@@ -29,6 +29,8 @@ void crash_report_exception(const struct exception_frame *frame, uint64_t cr2) {
     print_reg("rip", frame->rip);
     print_reg("cs", frame->cs);
     print_reg("rflags", frame->rflags);
+    print_reg("rsp", frame->rsp);
+    print_reg("ss", frame->ss);
     serial_puts("\n");
     if (frame->vector == 14) {
         print_reg("cr2", cr2);

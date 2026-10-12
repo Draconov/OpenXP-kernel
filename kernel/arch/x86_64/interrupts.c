@@ -19,7 +19,7 @@ struct idt_pointer {
 } __attribute__((packed));
 _Static_assert(sizeof(struct idt_gate) == 16, "x86-64 IDT gate must be 16 bytes");
 _Static_assert(sizeof(struct idt_pointer) == 10, "x86-64 IDTR must be 10 bytes");
-_Static_assert(sizeof(struct exception_frame) == 160, "IRQ assembly frame mismatch");
+_Static_assert(sizeof(struct exception_frame) == 176, "IRQ assembly frame mismatch");
 _Static_assert(TIMER_VECTOR == 32, "irq.S vector must match PIC offset");
 static struct idt_gate idt[256];
 

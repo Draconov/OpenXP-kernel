@@ -1,5 +1,5 @@
 /* x86-64 exception entries. CPU-supplied error codes are not duplicated.
- * Common frame: 15 saved GPRs, vector, error, RIP, CS, RFLAGS.
+ * Common frame: 15 saved GPRs, vector, error, RIP, CS, RFLAGS, RSP, SS.
  * We intentionally never return from a fatal exception in this milestone. */
 .section .text
 .macro ISR num has_error=0

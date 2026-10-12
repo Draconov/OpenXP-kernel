@@ -5,6 +5,7 @@
 #include "mm/pmm.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -88,11 +89,18 @@ int main(void) {
     scheduler_test_active_memory(&root, &rsp0);
     assert(root == 0x2000 && rsp0 == 0xffff800000400000ULL);
     struct exception_frame *first = (struct exception_frame *)(uintptr_t)a_rsp;
-    assert(sizeof(*first) == 160);
+    /* Regression for x86-64 IRETQ reading the unmapped upper stack guard:
+     * RSP and SS must be the final two qwords, even for a CPL0 return. */
+    assert(sizeof(*first) == 176);
+    assert(offsetof(struct exception_frame, rsp) == 160);
+    assert(offsetof(struct exception_frame, ss) == 168);
     assert(first->vector == 32 && first->error == 0);
     assert(first->cs == 0x08 && first->rflags == 0x202);
     assert(first->rip != 0);
-    assert(((uintptr_t)first + sizeof(*first)) % 16 == 8);
+    assert(first->ss == 0x10);
+    assert(first->rsp == (uint64_t)(uintptr_t)first + sizeof(*first));
+    assert((first->rsp & 15u) == 8);
+    assert(*(const uint64_t *)(uintptr_t)first->rsp != 0);
     uint64_t b_rsp = scheduler_on_timer_interrupt(a_rsp, 0);
     assert(b_rsp != a_rsp && scheduler_current_id() == b);
     assert(scheduler_test_memory(a, &root, &rsp0) && root == 0x2000);

@@ -3,6 +3,8 @@
  * Every integer GPR is saved in the same order as exception_frame.
  * All registers, including volatile ones, are restored before iretq.
  * The returned RSP may point into a different, guarded kernel stack.
+ * The CPU always pushes RSP and SS in x86-64 mode, including CPL0->CPL0.
+ * IRETQ consumes these fields; fabricated first-run frames must have them.
  * IRQ0 is a CPL0-only, no-error-code interrupt gate; never enable IF here. */
 .section .text
 .global irq_timer_entry

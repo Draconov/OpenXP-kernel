@@ -121,16 +121,20 @@ uint64_t scheduler_create(thread_entry_fn entry, void *arg) {
     t->address_root = default_root;
     t->kernel_rsp0 = default_rsp0;
     if (preemptive) {
-        /* IRQ frame must match the pushes in irq.S: 15 GPRs, vector/error,
-         * RIP, CS and RFLAGS. iretq -> RSP==top-8, satisfying SysV ABI.
-         * That final fake return slot is intentionally NEVER executed. */
+        /* IRQ frame must match irq.S and the *full* long-mode hardware
+         * return frame: 15 GPRs, vector/error, RIP, CS, RFLAGS, RSP, SS.
+         * Even when returning to CPL0, IRETQ pops RSP and SS. Omitting
+         * those fields makes it read the upper unmapped stack guard page.
+         * RSP==top-8 meets the SysV entry ABI. The fake return address
+         * is a safety fallback and is not normally executed. */
         *(uint64_t *)(uintptr_t)(top - 8ULL) = (uint64_t)(uintptr_t)thread_finished;
         struct exception_frame *frame = (struct exception_frame *)(uintptr_t)
             (top - 8ULL - sizeof(struct exception_frame));
         *frame = (struct exception_frame){
             .vector = 32, .error = 0,
             .rip = (uint64_t)(uintptr_t)thread_trampoline,
-            .cs = 0x08, .rflags = 0x202 /* reserved bit + IF */
+            .cs = 0x08, .rflags = 0x202, /* reserved bit + IF */
+            .rsp = top - 8ULL, .ss = 0x10 /* kernel data selector */
         };
         t->saved_sp = (uint64_t)(uintptr_t)frame;
     } else {
