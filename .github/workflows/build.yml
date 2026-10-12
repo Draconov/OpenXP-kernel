@@ -1,0 +1,60 @@
+name: Kernel Build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang lld make git xorriso qemu-system-x86
+      - name: Host-side subsystem and native context-switch tests
+        run: make test-unit
+      - name: Host-side sanitizer tests
+        run: make test-sanitize
+      - name: Compile kernel
+        run: make kernel
+      - name: Build ISO
+        run: make iso
+      - name: Boot normal graphical desktop (serial markers)
+        run: make smoke
+      - name: Deep diagnostic boot self-tests
+        run: make smoke-deep
+      - name: CPU exception integration test
+        run: make smoke-exception
+      - name: Guard-page page-fault integration test
+        run: make smoke-guard
+      - name: Timer IRQ0 preemption integration test
+        run: make smoke-timer
+      - name: Synchronization and IPC live-QEMU test
+        run: make smoke-sync
+      - name: Ring 3 and system call integration test
+        run: make smoke-user
+      - name: Private CR3 and static ELF64 loader integration test
+        run: make smoke-process
+      - name: Boot bundled read-only initrd applications and recover from a CPL3 fault
+        run: make smoke-initrd
+      - name: Two Ring 3 processes under timer IRQ preemption
+        run: make smoke-user-preempt
+      - name: User fault isolation integration test
+        run: make smoke-user-fault
+      - name: Verify user mode cannot read supervisor memory
+        run: make smoke-user-protection
+      - name: Upload build results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openxp-kernel-v1.8.0
+          path: |
+            build/openxp.iso
+            build/openxp.elf
+            build/deep/openxp.elf
+            build/exception/openxp.elf
+            build/guard/openxp.elf
+            build/timer/openxp.elf
+            build/sync/openxp.elf
+            build/user-fault/openxp.elf
+            build/user-protection/openxp.elf
+          retention-days: 3

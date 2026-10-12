@@ -1,0 +1,185 @@
+SHELL := /bin/bash
+CC := clang
+LD := ld.lld
+HOST_CC ?= cc
+BUILD ?= build
+BOOTLOADER_DIR ?= build/limine
+LIMINE_BRANCH ?= v10.x-binary
+EXTRA_CFLAGS ?=
+CFLAGS := -target x86_64-unknown-none-elf -std=c11 -O2 -g -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mcmodel=kernel -Wall -Wextra -Werror -Ikernel -MMD -MP $(EXTRA_CFLAGS)
+LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T kernel/linker.ld
+C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/user/userspace.c kernel/user/process.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
+ASM_SOURCES := kernel/arch/x86_64/isr.S kernel/arch/x86_64/irq.S kernel/sched/switch.S kernel/user/entry.S kernel/user/demo.S kernel/fs/initrd_data.S
+OBJECTS := $(patsubst kernel/%.c,$(BUILD)/%.o,$(C_SOURCES)) $(patsubst kernel/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
+-include $(OBJECTS:.o=.d)
+ISO := $(BUILD)/openxp.iso
+
+.PHONY: smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
+all: iso
+kernel: $(BUILD)/openxp.elf
+$(BUILD)/%.o: kernel/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/%.o: kernel/%.S
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -DOPENXP_INITRD_PATH=\"$(BUILD)/initrd.img\" -c $< -o $@
+$(BUILD)/apps/%.o: apps/%.S
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -c $< -o $@
+$(BUILD)/apps/%.bin: $(BUILD)/apps/%.o
+	$(LD) -m elf_x86_64 --oformat binary -Ttext 0x100000 $< -o $@
+$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin tools/mkinitrd.py
+	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin
+$(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
+$(BUILD)/openxp.elf: $(OBJECTS) kernel/linker.ld
+	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
+$(BOOTLOADER_DIR)/limine-bios.sys:
+	@mkdir -p $(dir $(BOOTLOADER_DIR))
+	git clone --depth=1 --branch $(LIMINE_BRANCH) https://github.com/limine-bootloader/limine.git $(BOOTLOADER_DIR)
+$(ISO): $(BUILD)/openxp.elf $(BOOTLOADER_DIR)/limine-bios.sys limine.conf
+	@command -v xorriso >/dev/null || { echo 'Install xorriso'; exit 1; }
+	@mkdir -p $(BUILD)/iso/boot/limine $(BUILD)/iso/EFI/BOOT
+	cp $(BUILD)/openxp.elf $(BUILD)/iso/boot/openxp.elf
+	cp limine.conf $(BUILD)/iso/boot/limine/limine.conf
+	cp $(BOOTLOADER_DIR)/limine-bios.sys $(BOOTLOADER_DIR)/limine-bios-cd.bin $(BOOTLOADER_DIR)/limine-uefi-cd.bin $(BUILD)/iso/boot/limine/
+	cp $(BOOTLOADER_DIR)/BOOTX64.EFI $(BUILD)/iso/EFI/BOOT/
+	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label $(BUILD)/iso -o $(ISO)
+	$(MAKE) -C $(BOOTLOADER_DIR)
+	$(BOOTLOADER_DIR)/limine bios-install $(ISO)
+iso: $(ISO)
+run: iso
+	qemu-system-x86_64 -m 512M -cdrom $(ISO) -serial stdio -no-reboot
+smoke: iso
+	bash scripts/smoke.sh $(ISO) OPENXP_BOOT_OK
+smoke-deep:
+	$(MAKE) BUILD=build/deep EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
+	bash scripts/smoke.sh build/deep/openxp.iso OPENXP_DEEP_OK
+smoke-exception:
+	$(MAKE) BUILD=build/exception EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_EXCEPTION_SELFTEST" iso
+	bash scripts/smoke.sh build/exception/openxp.iso OPENXP_EXCEPTION_OK
+smoke-timer:
+	$(MAKE) BUILD=build/timer EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_TIMER_SELFTEST" iso
+	bash scripts/smoke.sh build/timer/openxp.iso OPENXP_TIMER_OK
+smoke-sync:
+	$(MAKE) BUILD=build/sync EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_SYNC_SELFTEST" iso
+	bash scripts/smoke.sh build/sync/openxp.iso OPENXP_SYNC_TEST_OK
+smoke-user:
+	$(MAKE) BUILD=build/user EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
+	bash scripts/smoke.sh build/user/openxp.iso OPENXP_USERSPACE_OK
+smoke-process:
+	$(MAKE) BUILD=build/process EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
+	bash scripts/smoke.sh build/process/openxp.iso OPENXP_PROCESS_REAP_OK
+smoke-user-preempt:
+	$(MAKE) BUILD=build/preempt EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
+	bash scripts/smoke.sh build/preempt/openxp.iso OPENXP_USER_PREEMPT_OK
+smoke-initrd:
+	$(MAKE) BUILD=build/initrd EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
+	bash scripts/smoke.sh build/initrd/openxp.iso OPENXP_INITRD_OK
+smoke-user-protection:
+	$(MAKE) BUILD=build/user-protection EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_USER_PROTECTION_SELFTEST" iso
+	bash scripts/smoke.sh build/user-protection/openxp.iso OPENXP_USER_PROTECTION_OK
+smoke-user-fault:
+	$(MAKE) BUILD=build/user-fault EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_USER_FAULT_SELFTEST" iso
+	bash scripts/smoke.sh build/user-fault/openxp.iso OPENXP_USER_FAULT_OK
+smoke-guard:
+	$(MAKE) BUILD=build/guard EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_GUARD_SELFTEST" iso
+	bash scripts/smoke.sh build/guard/openxp.iso OPENXP_GUARD_OK
+
+test-unit: test-desktop $(BUILD)/initrd.img
+	@mkdir -p build/tests
+	python3 -m unittest discover -s tests -p 'test_*.py'
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_test
+	build/tests/initrd_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/initrd_image_test.c kernel/fs/initrd.c -o build/tests/initrd_image_test
+	build/tests/initrd_image_test $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c -o build/tests/process_manager_test
+	build/tests/process_manager_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/syscall_test.c kernel/user/syscall.c -o build/tests/syscall_test
+	build/tests/syscall_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
+	build/tests/process_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/pmm_test.c kernel/mm/pmm.c -o build/tests/pmm_test
+	build/tests/pmm_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/vmm_test.c kernel/mm/vmm.c -o build/tests/vmm_test
+	build/tests/vmm_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/heap_test.c kernel/mm/heap.c -o build/tests/heap_test
+	build/tests/heap_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/heap_stress_test.c kernel/mm/heap.c -o build/tests/heap_stress_test
+	build/tests/heap_stress_test
+	$(HOST_CC) -std=c11 -O2 -g -fno-builtin -Wall -Wextra -Werror tests/string_test.c kernel/lib/string.c -o build/tests/string_test
+	build/tests/string_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/scheduler_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_test
+	build/tests/scheduler_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/context_switch_test.c kernel/sched/switch.S -o build/tests/context_switch_test
+	build/tests/context_switch_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel tests/timer_test.c kernel/arch/x86_64/timer.c -o build/tests/timer_test
+	build/tests/timer_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/preempt_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_test
+	build/tests/preempt_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/sleep_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_test
+	build/tests/sleep_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/irq_state_test.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_test
+	build/tests/irq_state_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/crash_test.c kernel/diag/crash.c -o build/tests/crash_test
+	build/tests/crash_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
+	build/tests/sync_test
+
+test-sanitize: test-desktop-sanitize
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_sanitized
+	build/tests/initrd_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c -o build/tests/process_manager_sanitized
+	build/tests/process_manager_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/syscall_test.c kernel/user/syscall.c -o build/tests/syscall_sanitized
+	build/tests/syscall_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
+	build/tests/process_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/pmm_test.c kernel/mm/pmm.c -o build/tests/pmm_sanitized
+	build/tests/pmm_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/vmm_test.c kernel/mm/vmm.c -o build/tests/vmm_sanitized
+	build/tests/vmm_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/heap_test.c kernel/mm/heap.c -o build/tests/heap_sanitized
+	build/tests/heap_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/heap_stress_test.c kernel/mm/heap.c -o build/tests/heap_stress_sanitized
+	build/tests/heap_stress_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fno-builtin -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/string_test.c kernel/lib/string.c -o build/tests/string_sanitized
+	build/tests/string_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/scheduler_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_sanitized
+	build/tests/scheduler_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel tests/timer_test.c kernel/arch/x86_64/timer.c -o build/tests/timer_sanitized
+	build/tests/timer_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/preempt_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_sanitized
+	build/tests/preempt_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/sleep_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_sanitized
+	build/tests/sleep_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/irq_state_test.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_sanitized
+	build/tests/irq_state_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/crash_test.c kernel/diag/crash.c -o build/tests/crash_sanitized
+	build/tests/crash_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_sanitized
+	build/tests/sync_sanitized
+test-desktop:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/shell_test.c kernel/shell/shell.c -o build/tests/shell_test
+	build/tests/shell_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/fb_test.c kernel/video/fb.c -o build/tests/fb_test
+	build/tests/fb_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_test
+	build/tests/input_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/shell/shell.c kernel/video/fb.c -o build/tests/desktop_test
+	build/tests/desktop_test
+
+test-desktop-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/shell_test.c kernel/shell/shell.c -o build/tests/shell_sanitized
+	build/tests/shell_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/fb_test.c kernel/video/fb.c -o build/tests/fb_sanitized
+	build/tests/fb_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_sanitized
+	build/tests/input_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/shell/shell.c kernel/video/fb.c -o build/tests/desktop_sanitized
+	build/tests/desktop_sanitized
+
+clean:
+	rm -rf $(BUILD) build/deep build/process build/preempt build/user build/initrd build/exception build/guard build/timer build/sync build/user-fault build/user-protection build/tests
