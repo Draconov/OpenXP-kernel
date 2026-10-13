@@ -19,6 +19,11 @@ typedef struct {
     char input[96];
     char cwd[16];
     size_t used;
+    size_t cursor;
+    char history[8][96];
+    char draft[96];
+    unsigned history_count,history_next;
+    int history_index; /* -1 = fresh input, 0 = latest command */
     shell_output_fn output;
     void *output_ctx;
     shell_services_t services;
@@ -28,4 +33,11 @@ void shell_init(shell_t *shell, shell_output_fn output, void *output_ctx, shell_
 void shell_execute(shell_t *shell, const char *line);
 /* Returns true when the terminal changed. Converts \r to Enter; ignores controls. */
 bool shell_key(shell_t *shell, char c);
+/* Editing and browsing are separate from text input to support PS/2 arrows. */
+bool shell_history(shell_t *shell,int direction);
+bool shell_left(shell_t *shell);
+bool shell_right(shell_t *shell);
+bool shell_home(shell_t *shell);
+bool shell_end(shell_t *shell);
+bool shell_delete(shell_t *shell);
 #endif

@@ -72,30 +72,74 @@ static void desktop_interactive_loop(void) {
     input_state_init(&desktop_input,desktop_fb.width,desktop_fb.height);
     input_hardware_init();
     desktop_draw(&desktop);
-    serial_puts("OpenXP desktop: PS/2 keyboard and mouse + COM1 terminal enabled\n");
+    serial_puts(input_irq_ready()?"OpenXP input: PS/2 IRQ1/IRQ12 buffered\n":
+                                   "OpenXP input: legacy PS/2 polling fallback\n");
+    serial_puts("OpenXP desktop: keyboard, mouse + COM1 terminal enabled\n");
     serial_puts("OPENXP_INPUT_OK\nOPENXP_GUI_OK\nOPENXP_SHELL_OK\nOPENXP_WM_OK\n");
     timer_enable();
     uint64_t last_second=timer_ticks()/100u;
     for (;;) {
         bool redraw=false;
         input_event_t event;
-        for(unsigned i=0;i<32 && input_poll(&desktop_input,&event);++i) {
+        /* Consume whole PS/2 packets rather than stopping after the first byte.
+           Pure cursor movements restore only the cursor's 9x13 underlay; a
+           whole-screen repaint on each movement was prohibitively expensive. */
+        for(unsigned i=0;i<128 && input_poll(&desktop_input,&event);++i) {
+            if(event.kind==INPUT_NONE)continue;
             desktop_tick(&desktop,timer_ticks());
-            if(event.kind==INPUT_KEY)desktop_key(&desktop,event.key);
-            else desktop_mouse(&desktop,event.x,event.y,event.left);
-            redraw=true;
+            if(event.kind==INPUT_KEY) {
+                int before=desktop_top_window(&desktop);
+                bool had_menu=desktop.start_open;
+                desktop_key_event(&desktop,&event);
+                if(!redraw && !had_menu && !desktop.start_open &&
+                   before>=0 && before==desktop_top_window(&desktop))
+                    desktop_redraw_active(&desktop);
+                else redraw=true;
+            } else {
+                bool was_dragging=desktop.dragging;
+                int which=desktop.drag_window;
+                int oldx=0,oldy=0;
+                if(was_dragging && which>=0 && which<DESKTOP_WINDOWS) {
+                    oldx=desktop.windows[which].x;
+                    oldy=desktop.windows[which].y;
+                }
+                desktop_mouse(&desktop,event.x,event.y,event.left);
+                desktop_right_mouse(&desktop,event.x,event.y,event.right);
+                if(desktop.paint_dirty){
+                    if(!redraw && event.kind==INPUT_MOVE)
+                        desktop_redraw_paint(&desktop);
+                    desktop.paint_dirty=false;
+                }
+                if(was_dragging && which>=0 && which<DESKTOP_WINDOWS &&
+                   (oldx!=desktop.windows[which].x || oldy!=desktop.windows[which].y)) {
+                    if(!redraw)desktop_redraw_moved_window(&desktop,oldx,oldy,which);
+                } else if(event.kind==INPUT_BUTTON || (!was_dragging && desktop.dragging))
+                    redraw=true;
+                else if(!redraw)desktop_cursor_update(&desktop);
+            }
         }
         char c;
         for(unsigned i=0;i<64 && serial_try_getc(&c);++i) {
             if(c=='\r')c='\n';
+            int before=desktop_top_window(&desktop);
             desktop_key(&desktop,c);
-            redraw=true;
+            if(!redraw && !desktop.start_open &&
+               before==DESKTOP_TERMINAL &&
+               desktop_top_window(&desktop)==DESKTOP_TERMINAL)
+                desktop_redraw_terminal(&desktop);
+            else redraw=true;
         }
         uint64_t now=timer_ticks();
-        if(now/100u!=last_second) {last_second=now/100u;redraw=true;}
-        if(redraw) {desktop_tick(&desktop,now);desktop_draw(&desktop);}
-        /* Only PIT IRQ0 is unmasked; it wakes us to poll keyboard and mouse.
-           Input IRQ1/12 remains masked: no unsynchronized ISR races. */
+        desktop_tick(&desktop,now);
+        if(now/100u!=last_second) {
+            last_second=now/100u;
+            if(!redraw)desktop_redraw_taskbar(&desktop);
+            if(!redraw && desktop_top_window(&desktop)==DESKTOP_MONITOR)
+                desktop_redraw_active(&desktop);
+        }
+        if(redraw)desktop_draw(&desktop);
+        /* IRQ1/IRQ12 enqueue PS/2 bytes and wake HLT immediately; the
+           foreground loop does all decoding, GUI and shell work. */
         __asm__ volatile ("hlt" ::: "memory");
     }
 }

@@ -16,16 +16,16 @@ bool initrd_name_at(size_t index,char *dst,size_t cap){
     dst[n]=0;return true;
 }
 int main(void){
-    fb_surface_t f={(volatile uint8_t*)image,640,480,640*4,8,8,8,16,8,0};
+    fb_surface_t f={(volatile uint8_t*)image,640,480,640*4,8,8,8,16,8,0,false,0,0,0,0};
     static desktop_t d;
     desktop_init(&d,&f,(shell_services_t){.run=launch});
     assert(desktop_top_window(&d)==DESKTOP_ABOUT);
     desktop_draw(&d);
     desktop_mouse(&d,20,462,true);assert(d.start_open);
     desktop_mouse(&d,20,462,false);
-    desktop_mouse(&d,27,480-42-232+60,true);
+    desktop_mouse(&d,27,480-42-320+65,true);
     assert(!d.start_open && desktop_top_window(&d)==DESKTOP_TERMINAL);
-    desktop_mouse(&d,27,480-42-232+60,false);
+    desktop_mouse(&d,27,480-42-320+65,false);
     int x=d.windows[0].x,y=d.windows[0].y;
     desktop_mouse(&d,x+20,y+10,true);
     desktop_mouse(&d,x+60,y+40,true);
@@ -39,14 +39,153 @@ int main(void){
     desktop_mouse(&d,2,2,false);
     desktop_mouse(&d,20,462,true);assert(d.start_open);
     desktop_mouse(&d,20,462,false);
-    desktop_mouse(&d,27,480-42-232+110,true);
+    desktop_mouse(&d,27,480-42-320+114,true);
     assert(desktop_top_window(&d)==DESKTOP_FILES);
-    desktop_mouse(&d,27,480-42-232+110,false);
+    desktop_mouse(&d,27,480-42-320+114,false);
     desktop_window_t w=d.windows[DESKTOP_FILES];
     desktop_mouse(&d,w.x+42,w.y+115+23,true);
     assert(d.selected_file==1);
     desktop_mouse(&d,w.x+42,w.y+115+23,false);
     desktop_mouse(&d,w.x+w.w-80,w.y+w.h-21,true);
     assert(launches==1);
-    puts("PASS: window focus, menu, drag, terminal, file selection/run, close, rendering");
+    /* The cursor must be movable without repainting or damaging wallpaper. */
+    static desktop_t fast;
+    desktop_init(&fast,&f,(shell_services_t){.run=launch});
+    fast.mouse_x=400;fast.mouse_y=400;
+    desktop_draw(&fast);
+    uint32_t untouched=fast.cursor_background[0];
+    desktop_mouse(&fast,410,410,false);
+    desktop_cursor_update(&fast);
+    assert(image[400*640+400]==untouched);
+    desktop_mouse(&fast,470,410,false);
+    desktop_cursor_update(&fast);
+    assert(image[400*640+400]==untouched); /* original restored */
+    /* Windows key / Enter navigates the Start menu without a mouse. */
+    input_event_t ev={.kind=INPUT_KEY,.code=KEY_WINDOWS,.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(fast.start_open);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_DOWN};
+    desktop_key_event(&fast,&ev);assert(fast.menu_selection==1);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_ENTER,.key='\n'};
+    desktop_key_event(&fast,&ev);
+    assert(!fast.start_open && desktop_top_window(&fast)==DESKTOP_FILES);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='r',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);
+    assert(desktop_top_window(&fast)==DESKTOP_TERMINAL);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_F4,.modifiers=KEYMOD_ALT};
+    desktop_key_event(&fast,&ev);assert(!fast.windows[DESKTOP_TERMINAL].open);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='d',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(fast.showing_desktop);
+    desktop_key_event(&fast,&ev);assert(!fast.showing_desktop);
+    /* New desktop applications are controlled with both hotkeys and typing. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='n',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);
+    assert(desktop_top_window(&fast)==DESKTOP_NOTEPAD);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='H'};
+    desktop_key_event(&fast,&ev);
+    ev.key='i';desktop_key_event(&fast,&ev);
+    assert(fast.note_length==2 && fast.note_cursor==2);
+    assert(fast.note[0]=='H' && fast.note[1]=='i');
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_LEFT};
+    desktop_key_event(&fast,&ev);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='!'};
+    desktop_key_event(&fast,&ev);
+    assert(fast.note_length==3 && fast.note[1]=='!');
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_BACKSPACE};
+    desktop_key_event(&fast,&ev);
+    assert(fast.note_length==2 && fast.note[1]=='i');
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='n',.modifiers=KEYMOD_CTRL};
+    desktop_key_event(&fast,&ev);
+    assert(fast.note_length==0);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='c',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);
+    assert(desktop_top_window(&fast)==DESKTOP_CALCULATOR);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='8'};
+    desktop_key_event(&fast,&ev);
+    ev.key='*';desktop_key_event(&fast,&ev);
+    ev.key='7';desktop_key_event(&fast,&ev);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_ENTER,.key='\n'};
+    desktop_key_event(&fast,&ev);
+    assert(!fast.calc_error && fast.calc_entry==56);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='c'};
+    desktop_key_event(&fast,&ev);
+    assert(fast.calc_entry==0);
+    /* Dirty-window repaint must preserve pixels outside the moving region. */
+    desktop_draw(&fast);
+    uint32_t corner=image[0];
+    int oldx=fast.windows[DESKTOP_CALCULATOR].x;
+    int oldy=fast.windows[DESKTOP_CALCULATOR].y;
+    fast.windows[DESKTOP_CALCULATOR].x+=11;
+    desktop_redraw_moved_window(&fast,oldx,oldy,DESKTOP_CALCULATOR);
+    assert(image[0]==corner);
+    assert(!f.clip_active);
+    /* Additional applications: hotkeys, Paint brush and palettes. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='p',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(desktop_top_window(&fast)==DESKTOP_PAINT);
+    w=fast.windows[DESKTOP_PAINT];
+    desktop_mouse(&fast,w.x+16+38*2+8,w.y+60,true);
+    assert(fast.paint_color==2);
+    desktop_mouse(&fast,w.x+16+38*2+8,w.y+60,false);
+    desktop_mouse(&fast,w.x+16+4,w.y+96+4,true);
+    assert(fast.paint[2*160+2]==2);
+    desktop_mouse(&fast,w.x+16+44,w.y+96+4,true);
+    for(unsigned cx=2;cx<=22;++cx) assert(fast.paint[2*160+cx]==2);
+    assert(fast.paint_dirty);
+    uint32_t untouched_paint=image[0];
+    desktop_redraw_paint(&fast);
+    assert(!fast.paint_dirty && image[0]==untouched_paint);
+    desktop_mouse(&fast,w.x+16+44,w.y+96+4,false);
+    desktop_mouse(&fast,w.x+24,w.y+w.h-25,true);
+    assert(fast.paint[2*160+2]==0 && fast.paint[2*160+22]==0);
+    desktop_mouse(&fast,w.x+24,w.y+w.h-25,false);
+    /* Taskbar must keep all open windows within its usable area. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='m',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(desktop_top_window(&fast)==DESKTOP_MONITOR);
+    desktop_draw(&fast);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='s',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(desktop_top_window(&fast)==DESKTOP_SETTINGS);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='3'};
+    desktop_key_event(&fast,&ev);assert(fast.appearance==2);
+    desktop_draw(&fast);
+    assert(image[0]!=corner);
+    ev.key='1';desktop_key_event(&fast,&ev);assert(fast.appearance==0);
+    /* Mines is guaranteed to keep the first move safe. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='g',.modifiers=KEYMOD_WIN};
+    desktop_key_event(&fast,&ev);assert(desktop_top_window(&fast)==DESKTOP_MINES);
+    w=fast.windows[DESKTOP_MINES];
+    desktop_mouse(&fast,w.x+30+25*4+9,w.y+92+25*4+9,true);
+    assert(fast.mine_started && !fast.mine_lost && fast.mine_revealed>=1);
+    assert(fast.mine_values[4*9+4]>=0);
+    unsigned mines=0;
+    for(int z=0;z<81;++z)if(fast.mine_values[z]==-1)++mines;
+    assert(mines==10);
+    desktop_mouse(&fast,w.x+30+25*4+9,w.y+92+25*4+9,false);
+    /* Restart then place/remove a flag using F over the hovered cell. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='n'};
+    desktop_key_event(&fast,&ev);assert(!fast.mine_started && !fast.mine_flags);
+    desktop_mouse(&fast,w.x+32,w.y+94,false);
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='f'};
+    desktop_key_event(&fast,&ev);assert(fast.mine_flags==1 && fast.mine_cells[0]==2);
+    desktop_key_event(&fast,&ev);assert(fast.mine_flags==0 && fast.mine_cells[0]==0);
+    desktop_right_mouse(&fast,w.x+32,w.y+94,true);
+    assert(fast.mine_flags==1 && fast.mine_cells[0]==2);
+    desktop_right_mouse(&fast,w.x+32,w.y+94,false);
+    desktop_right_mouse(&fast,w.x+32,w.y+94,true);
+    assert(fast.mine_flags==0 && fast.mine_cells[0]==0);
+    desktop_right_mouse(&fast,w.x+32,w.y+94,false);
+    /* Uncover every non-mine square: must report a win without a fault. */
+    desktop_mouse(&fast,w.x+30+25*4+4,w.y+92+25*4+4,true);
+    desktop_mouse(&fast,w.x+30+25*4+4,w.y+92+25*4+4,false);
+    for(int cell=0;cell<81;++cell)if(fast.mine_values[cell]>=0){
+        int mx=w.x+30+(cell%9)*25+5,my=w.y+92+(cell/9)*25+5;
+        desktop_mouse(&fast,mx,my,true);
+        desktop_mouse(&fast,mx,my,false);
+    }
+    assert(fast.mine_won && !fast.mine_lost && fast.mine_revealed==71);
+    desktop_draw(&fast);
+    /* Second column of the Start menu works with the pointer. */
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_WINDOWS};
+    desktop_key_event(&fast,&ev);assert(fast.start_open);
+    desktop_mouse(&fast,270,480-42-320+65,true);
+    assert(!fast.start_open && desktop_top_window(&fast)==DESKTOP_PAINT);
+    puts("PASS: window actions, shortcuts, Paint, System Monitor, Settings, Mines, clipped redraw");
 }

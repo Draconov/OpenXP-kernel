@@ -34,6 +34,8 @@ DECLARE_ISR(24); DECLARE_ISR(25); DECLARE_ISR(26); DECLARE_ISR(27);
 DECLARE_ISR(28); DECLARE_ISR(29); DECLARE_ISR(30); DECLARE_ISR(31);
 extern void isr_unexpected(void);
 extern void irq_timer_entry(void);
+extern void irq_keyboard_entry(void);
+extern void irq_mouse_entry(void);
 extern void irq_syscall_entry(void);
 
 static void idt_set(unsigned vector, void (*handler)(void), uint16_t cs, uint8_t ist) {
@@ -59,7 +61,9 @@ void interrupts_init(void) {
         uint8_t ist = i == 8 ? 1 : (i == 2 ? 2 : (i == 18 ? 3 : 0));
         idt_set(i, exceptions[i], cs, ist);
     }
-    idt_set(TIMER_VECTOR, irq_timer_entry, cs, 0); /* PIC IRQ0, kernel-only */
+    idt_set(TIMER_VECTOR, irq_timer_entry, cs, 0);
+    idt_set(33, irq_keyboard_entry, cs, 0); /* PIC IRQ1 */
+    idt_set(44, irq_mouse_entry, cs, 0);    /* PIC IRQ12 */
     idt_set(0x80, irq_syscall_entry, cs, 0);
     idt[0x80].attributes = 0xee; /* Present 64-bit interrupt gate, DPL3 */
     const struct idt_pointer ptr = { .limit = sizeof(idt) - 1, .base = (uint64_t)(uintptr_t)idt };

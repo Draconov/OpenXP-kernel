@@ -12,33 +12,91 @@ a protected userspace windowing system.
 
 | Feature | Interaction |
 | --- | --- |
-| Start menu | Open Terminal, My Computer and About OpenXP |
+| Start menu | Two columns of built-in programs, with mouse or keyboard selection |
 | Windows | Click to focus; drag title bars; minimize or close |
 | Taskbar | Reopen or switch built-in windows |
 | Terminal | Type commands, use Enter and Backspace |
-| Keyboard | Tab cycles visible windows |
+| Keyboard | Windows key opens Start; arrow keys and Enter select its items |
 | File browser | Inspect bundled read-only files and run supported ELF64 examples |
+| Notepad | Edit temporary RAM-only text; Ctrl+N starts a blank document |
+| Calculator | Four-operation integer arithmetic; buttons and keyboard |
+| Paint | Eight-color 160 x 100 RAM-only drawing surface; continuous brush strokes |
+| System Monitor | Uptime, free 4 KiB pages and open window status (not a process list) |
+| Appearance | Three selectable wallpaper presets, reset at reboot |
+| Mines | 9 x 9, ten mines, guaranteed safe first click; right-click flags |
 | Clock | Displays uptime, not date or local time |
 
-Mouse and keyboard input come from **legacy PS/2 polling**. The serial COM1
+Mouse and keyboard input use **legacy PS/2 IRQ1 and IRQ12** when i8042
+initialization succeeds. The interrupt handlers queue raw bytes; the foreground
+loop handles decoding and GUI events. If the controller refuses initialization,
+the system falls back to PS/2 polling at the PIT interval. The serial COM1
 console also feeds characters into the command interpreter. In QEMU, the normal
 `make run` target shows a graphical display and uses the terminal for serial output.
+
+## Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| `Win` or `Ctrl+Esc` | Toggle the Start menu |
+| `↑` / `↓`, `Enter`, `Esc` | Navigate, launch, or dismiss the Start menu |
+| `Win+E` | Open My Computer |
+| `Win+R` | Open Terminal (not a Windows Run dialog) |
+| `Win+N` | Open Notepad |
+| `Win+C` | Open Calculator |
+| `Win+P` | Open Paint |
+| `Win+M` | Open System Monitor |
+| `Win+S` | Open Appearance Settings |
+| `Win+G` | Open Mines |
+| `1`-`8`, `X` in Paint | Select a palette color, clear the canvas |
+| `1`-`3` in Appearance | Select a wallpaper preset |
+| Right-click or hover + `F` in Mines | Flag/unflag a hidden cell |
+| `N` in Mines | Reset the board |
+| `Ctrl+N` in Notepad | Clear the in-memory text (no undo) |
+| `Win+D` | Show desktop; press again to restore windows |
+| `Alt+Tab` | Switch between open windows |
+| `Alt+F4` | Close the focused window |
+| `Tab` | Cycle window focus (basic legacy behavior) |
+| `↑` / `↓` in Terminal | Browse command history |
+| `←` / `→`, `Home` / `End` | Edit the Terminal input line |
+| `Delete`, `Backspace` | Remove input characters |
+| `Ctrl+C` in Terminal | Clear the current input line (not clipboard copying) |
+| `Ctrl+L` in Terminal | Clear terminal scrollback |
+| `↑` / `↓`, `Enter` in My Computer | Select and attempt to launch a bundled program |
+
+Notepad holds up to 2,047 characters and cannot open or save documents;
+its contents disappear when the guest shuts down. Calculator handles
+nonnegative integers and shows an error on divide-by-zero, negative answers,
+or overflow. Paint images and Appearance choices are also temporary; no saving
+or file export is implemented. Mines generates ten mines after the first click
+and protects that first cell. These desktop tools run in Ring 0, **not** in
+separate protected processes.
+
+The keyboard decoder currently assumes a US set-1 PS/2 layout. These shortcuts
+work only when the VM passes the keys to OpenXP. The Windows key might be
+intercepted by host operating-system or VM keyboard settings.
 
 ## Terminal commands
 
 | Command | Action |
 | --- | --- |
-| `HELP` | Show available commands |
-| `VER` | Show build information |
-| `CLS` | Clear terminal output |
+| `HELP` | List command names |
+| `VER`, `UNAME` | Show basic kernel identification |
+| `CLS`, `CLEAR` | Clear Terminal output |
 | `ECHO hello` | Print text |
-| `DIR` | List entries in the current read-only folder |
-| `CD BIN`, `CD DOCS`, `CD ..` | Change the limited directory view |
-| `TYPE DOCS/README.TXT` | Read a bundled text file |
-| `MEM` | Show free physical pages |
-| `UPTIME` | Show PIT ticks |
-| `PS` | Show an experimental process-status placeholder |
-| `RUN BIN/HELLO` | Run a supported sample ELF64 application |
+| `DIR`, `LS` | List entries in the selected read-only folder |
+| `CD BIN`, `CD DOCS`, `CD ..` | Change between supported virtual folders |
+| `PWD` | Show current virtual directory |
+| `TREE` | Show the available virtual-folder structure |
+| `TYPE DOCS/README.TXT`, `CAT DOCS/README.TXT` | Read bundled text |
+| `MEM`, `FREE` | Show free physical page count |
+| `UPTIME` | Show PIT tick count |
+| `PS` | Show the experimental process-status placeholder |
+| `HISTORY` | Display recent Terminal commands (up to eight) |
+| `CALC 8 * 7` | Built-in basic integer calculator (`+`, `-`, `*`, `/`) |
+| `WHOAMI`, `HOSTNAME` | Display prototype user and host identity |
+| `SYSINFO` | Show the CPU target, framebuffer and current limitations |
+| `APPS` | Show built-in tools and instructions for running ELF samples |
+| `RUN BIN/HELLO` | Attempt to launch a supported ELF64 sample application |
 | `EXIT` | Minimize Terminal |
 
 `RUN` is synchronous and uses the experimental process launcher. Program output
@@ -48,22 +106,23 @@ The desktop may stop responding until that program exits.
 ## How the desktop works
 
 ```text
-PS/2 polling ─┐
-COM1 input ───┴─> input events ─> shell / window actions
-                                  │
-                           software renderer
-                                  │
-                            RGB framebuffer
+PS/2 IRQ or polling fallback ─> decoded input ─> desktop and applications
+COM1 serial input ───────────────────────┘              │
+                                                  software renderer
+                                                        │
+                                                   RGB framebuffer
 ```
 
-The implementation spans `kernel/input/`, `kernel/video/`,
-`kernel/gui/desktop.c` and `kernel/shell/`. It repaints the framebuffer instead
-of using GPU acceleration or a compositor. A fixed table represents three
-built-in windows with focus, position and visibility state.
+The desktop uses a software framebuffer, a cursor underlay and clipped redraws
+for window dragging. Paint also repaints just the rectangle touched by its
+brush; large changes still redraw more of the interface. The input subsystem
+buffers raw bytes in its IRQ handlers and processes them in the foreground;
+PS/2 polling is available as a fallback. The window manager currently handles
+nine fixed built-in windows, including the four new tools.
 
-The i8042 keyboard and mouse are polled together; their hardware interrupts
-remain masked. The mouse decoder expects standard three-byte PS/2 packets.
-Only supported framebuffer formats and legacy virtual hardware are targeted.
+The implementation lives in `kernel/input/`, `kernel/video/`,
+`kernel/gui/desktop.c`, and `kernel/shell/`. It has no GPU acceleration,
+writable persistent filesystem or graphics process isolation.
 
 ## Verify the implementation
 

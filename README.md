@@ -8,9 +8,10 @@ support. It is written primarily in freestanding C and x86-64 assembly.
 
 > [!WARNING]
 > **Research prototype — not a secure or everyday operating system.**
-> The kernel and desktop compile and have host-side tests, but a complete
-> graphical boot, hardware input, and user-mode execution have **not been
-> verified in QEMU**. Use a disposable virtual machine only.
+> OpenXP has reached the graphical desktop in a VirtualBox test, but hardware
+> input, security boundaries, and user-mode applications remain experimental.
+> Host tests do not replace a complete QEMU/VirtualBox integration test.
+> Use a disposable virtual machine only.
 
 ![OpenXP desktop preview](docs/desktop-preview.png)
 
@@ -106,6 +107,7 @@ are **not supported** by the current prototype.
 | **UEFI shell or firmware screen** | Disable **EFI** and retry BIOS boot. |
 | **Black screen or display problems** | Disable 3D acceleration, use **VBoxSVGA**, and retry. Compare with `make run` in QEMU. |
 | **Keyboard or mouse does not respond** | Set the pointing device to **PS/2 Mouse** and click inside the VM to capture input. VirtualBox input compatibility is still experimental. |
+| **Windows key doesn't open Start** | Click inside the VM so the keyboard is captured. The host or VirtualBox may intercept some shortcuts. |
 | **Kernel crash or reboot** | Review the GitHub Actions QEMU smoke-test logs. A passing compile does not prove VirtualBox compatibility. |
 
 For supported VM settings and optical-drive controls, see the
@@ -116,14 +118,43 @@ For supported VM settings and optical-drive controls, see the
 
 ## Explore the desktop
 
-- **Start menu:** open Terminal, My Computer, or About OpenXP.
-- **Windows:** focus, drag, minimize, or close the three built-in windows.
+- **Start menu:** browse nine built-in desktop windows in two columns.
+- **Windows:** focus, drag, minimize, close, or switch between open tools.
 - **Terminal:** type commands with a PS/2 keyboard or through the COM1 serial console.
 - **My Computer:** browse bundled read-only files and launch supported ELF64 examples.
+- **Notepad:** edit a RAM-only scratch document (up to 2,047 characters). No saving yet.
+- **Calculator:** basic nonnegative integer arithmetic, with keyboard and clickable buttons.
+- **Paint:** draw with an eight-color pencil on a 160 x 100 RAM-only canvas.
+- **System Monitor:** inspect uptime, available memory pages, and open windows.
+- **Appearance Settings:** choose from three wallpapers (not retained after reboot).
+- **Mines:** a 9 x 9 minefield with ten mines, first-click safety, flags and restart.
 - **Taskbar:** switch between windows and view elapsed uptime (not wall-clock time).
 
-Try `HELP` in the terminal to see commands such as `DIR`, `CD`, `TYPE`, `MEM`,
-`UPTIME`, `PS`, and `RUN BIN/HELLO`. Application output currently goes to COM1.
+**Keyboard shortcuts:** `Win` or `Ctrl+Esc` opens Start; use arrow keys and
+`Enter` to choose an item. `Win+E` opens My Computer, `Win+R` opens Terminal,
+`Win+D` toggles the desktop, `Win+N` opens Notepad, `Win+C` opens Calculator,
+`Win+P` opens Paint, `Win+M` opens System Monitor, `Win+S` opens Appearance,
+`Win+G` opens Mines, `Alt+Tab` switches windows, and `Alt+F4` closes
+the active window. In Terminal, use `↑`/`↓` for history, `←`/`→` and
+`Home`/`End` to edit, `Ctrl+C` to clear the input line and `Ctrl+L` to clear
+the output. Notepad accepts text, Enter for line breaks, Home/End, arrow keys, Backspace,
+and Delete; `Ctrl+N` clears its in-memory document. Calculator uses digits,
+`+`, `-`, `*`, `/`, Enter (equals), and `C` (clear). In Paint, press `1`-`8`
+to choose a color or `X` to clear the image. In Mines, right-click (or hover
+and press `F`) to flag a square, and press `N` to start a new game.
+Appearance Settings accepts `1`-`3`. These are OpenXP shortcuts,
+not Windows compatibility features.
+
+**New terminal commands:** `LS`, `CAT`, `CLEAR`, `PWD`, `TREE`, `HISTORY`,
+`CALC 8 * 7`, `WHOAMI`, `HOSTNAME`, `UNAME`, `SYSINFO` and `APPS`, in addition
+to `HELP`, `DIR`, `CD`, `TYPE`, `MEM`, `UPTIME`, `PS`, and `RUN BIN/HELLO`.
+Use `HELP` to see the command list. File access is read-only, and supported
+user-program output currently goes to COM1.
+
+The desktop uses IRQ-driven PS/2 keyboard/mouse input when the legacy
+controller permits it, with a fallback polling mode. Dragging windows repaints
+only the affected framebuffer rectangle. Actual smoothness on VirtualBox and
+other hardware still needs hands-on testing.
 
 The desktop and its command interpreter run in **kernel mode**. They are not
 isolated graphical applications; ELF64 user-mode execution is experimental.

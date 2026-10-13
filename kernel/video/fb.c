@@ -32,7 +32,24 @@ static const uint8_t font[37][7] = {
     {0,0,4,31,4,0,0},/* + */
     {0,0,0,0,0,0,0},/* space */
     {2,4,8,8,8,4,2},/* ( */
-    {8,4,2,2,2,4,8} /* ) */
+    {8,4,2,2,2,4,8}, /* ) */
+    {0,21,14,31,14,21,0}, /* * */
+    {4,4,8,0,0,0,0}, /* apostrophe */
+    {10,10,0,0,0,0,0}, /* double quote */
+    {10,31,10,31,10,0,0}, /* # */
+    {4,15,20,14,5,30,4}, /* $ */
+    {17,2,4,8,17,0,0}, /* % */
+    {12,18,20,8,21,18,13}, /* & */
+    {14,17,23,21,23,16,14}, /* @ */
+    {0,0,4,0,4,4,8}, /* ; */
+    {2,4,8,16,8,4,2}, /* < */
+    {8,4,2,1,2,4,8}, /* > */
+    {3,4,4,8,4,4,3}, /* { */
+    {24,4,4,2,4,4,24}, /* } */
+    {4,10,17,0,0,0,0}, /* ^ */
+    {0,0,9,22,0,0,0}, /* ~ */
+    {4,4,4,4,4,4,4}, /* | */
+    {8,4,2,0,0,0,0} /* backtick */
 };
 static const uint8_t *glyph(char c) {
     if (c >= 'a' && c <= 'z') c=(char)(c-'a'+'A');
@@ -46,7 +63,16 @@ static const uint8_t *glyph(char c) {
     case '[':return symbols[8];case ']':return symbols[9];
     case '_':return symbols[10];case '=':return symbols[11];
     case '+':return symbols[12];case '(':return symbols[14];
-    case ')':return symbols[15]; default:return symbols[13];
+    case ')':return symbols[15];case '*':return symbols[16];
+    case '\'':return symbols[17];case '"':return symbols[18];
+    case '#':return symbols[19];case '$':return symbols[20];
+    case '%':return symbols[21];case '&':return symbols[22];
+    case '@':return symbols[23];case ';':return symbols[24];
+    case '<':return symbols[25];case '>':return symbols[26];
+    case '{':return symbols[27];case '}':return symbols[28];
+    case '^':return symbols[29];case '~':return symbols[30];
+    case '|':return symbols[31];case '`':return symbols[32];
+    default:return symbols[13];
     }
 }
 bool fb_init(fb_surface_t *s,const struct limine_framebuffer *f) {
@@ -57,7 +83,7 @@ bool fb_init(fb_surface_t *s,const struct limine_framebuffer *f) {
        f->green_mask_shift>24||f->blue_mask_shift>24) return false;
     *s=(fb_surface_t){(volatile uint8_t*)f->address,(int)f->width,(int)f->height,(int)f->pitch,
         f->red_mask_size,f->green_mask_size,f->blue_mask_size,
-        f->red_mask_shift,f->green_mask_shift,f->blue_mask_shift};
+        f->red_mask_shift,f->green_mask_shift,f->blue_mask_shift,false,0,0,0,0};
     return true;
 }
 uint32_t fb_rgb(const fb_surface_t *s,uint8_t r,uint8_t g,uint8_t b) {
@@ -66,6 +92,11 @@ uint32_t fb_rgb(const fb_surface_t *s,uint8_t r,uint8_t g,uint8_t b) {
            (((uint32_t)g >> (8u-s->green_size)) << s->green_shift)|
            (((uint32_t)b >> (8u-s->blue_size)) << s->blue_shift);
 }
+void fb_clip_set(fb_surface_t *s,int x,int y,int w,int h) {
+    if(!s)return;
+    s->clip_active=true;s->clip_x=x;s->clip_y=y;s->clip_w=w;s->clip_h=h;
+}
+void fb_clip_clear(fb_surface_t *s){if(s)s->clip_active=false;}
 void fb_rect(fb_surface_t *s,int x,int y,int w,int h,uint32_t col) {
     if(!s||!s->pixels||w<=0||h<=0)return;
     /* 64-bit endpoints prevent x+w/y+h overflow from corrupting framebuffer. */
@@ -74,6 +105,14 @@ void fb_rect(fb_surface_t *s,int x,int y,int w,int h,uint32_t col) {
     if (y0<0) y0=0;
     if (x1>s->width) x1=s->width;
     if (y1>s->height) y1=s->height;
+    if(s->clip_active) {
+        int64_t right=(int64_t)s->clip_x+s->clip_w;
+        int64_t bottom=(int64_t)s->clip_y+s->clip_h;
+        if(x0<s->clip_x)x0=s->clip_x;
+        if(y0<s->clip_y)y0=s->clip_y;
+        if(x1>right)x1=right;
+        if(y1>bottom)y1=bottom;
+    }
     if(x1<=x0||y1<=y0)return;
     for(int64_t row=y0;row<y1;++row) {
         volatile uint32_t *p=(volatile uint32_t *)(s->pixels+row*s->pitch);

@@ -62,7 +62,8 @@ program through validated kernel interfaces.
 - [ ] Implement keyboard layouts, reliable key repeat and broader pointer input.
 - [ ] Add device discovery and USB keyboard/mouse support.
 - [ ] Introduce persistent settings, a working file manager and native apps.
-- [ ] Improve redraw performance, fonts, display scaling and screen modes.
+- [ ] Extend rectangular repainting to all window events and reduce framebuffer tearing.
+- [ ] Improve fonts, display scaling and screen modes.
 - [ ] Investigate framebuffer acceleration before attempting GPU drivers.
 
 **Completion criteria:** Several independent graphical applications remain

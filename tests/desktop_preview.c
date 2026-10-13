@@ -12,7 +12,7 @@ bool initrd_name_at(size_t n,char *dst,size_t cap) {
 }
 int main(int argc,char **argv) {
     if(argc!=2)return 2;
-    fb_surface_t surface={(volatile uint8_t*)fb,1024,768,4096,8,8,8,16,8,0};
+    fb_surface_t surface={(volatile uint8_t*)fb,1024,768,4096,8,8,8,16,8,0,false,0,0,0,0};
     static desktop_t desktop;
     desktop_init(&desktop,&surface,(shell_services_t){0});
     desktop_tick(&desktop,67230);

@@ -1,5 +1,6 @@
 #include "arch/x86_64/timer.h"
 #include "sched/scheduler.h"
+#include "input/input.h"
 
 /* The real PIC/PIT functions are purposely absent from host unit tests. */
 uint16_t timer_divisor_for_hz(unsigned hz) {
@@ -69,12 +70,16 @@ bool timer_init(unsigned requested_hz) {
 void timer_enable(void) {
     if (!configured) return;
     __asm__ volatile ("cli" ::: "memory");
-    outb(0x21, 0xfe); /* IRQ0 only */
+    if(input_irq_ready()) {
+        outb(0xa1,0xef); /* slave IRQ12 mouse */
+        outb(0x21,0xf8); /* IRQ0, IRQ1 keyboard, IRQ2 cascade */
+    } else outb(0x21,0xfe); /* Headless diagnostic boot: timer only */
     __asm__ volatile ("sti" ::: "memory");
 }
 void timer_disable(void) {
     __asm__ volatile ("cli" ::: "memory");
     outb(0x21, 0xff);
+    outb(0xa1, 0xff);
 }
 uint64_t timer_ticks(void) { return ticks; }
 uint64_t timer_monotonic_ms(void) {

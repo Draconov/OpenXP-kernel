@@ -51,3 +51,52 @@ irq_timer_entry:
     iretq
 .size irq_timer_entry, .-irq_timer_entry
 .section .note.GNU-stack,"",@progbits
+
+.section .text
+/* IRQ1 and IRQ12 save every GPR, preserving interrupted kernel state.
+   Input is only enqueued here; decode and GUI work run in foreground. */
+.macro INPUT_IRQ name number
+.global \name
+.type \name, @function
+\name:
+    cld
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq $\number, %rdi
+    movq %rsp, %rbx
+    andq $-16, %rsp
+    call input_irq_dispatch
+    movq %rbx, %rsp
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+    iretq
+.size \name, .-\name
+.endm
+INPUT_IRQ irq_keyboard_entry 1
+INPUT_IRQ irq_mouse_entry 12
