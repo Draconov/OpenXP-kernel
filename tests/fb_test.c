@@ -19,7 +19,15 @@ int main(void){
     assert(area[2+1+1*16]==outside);
     assert(area[2+6+6*16]==0x445566);
     assert(area[2+9+9*16]!=0x445566);
+    uint16_t row[]={0xf800,0x07e0,0x001f,0xffff};
+    fb_blit565_row(&s,6,7,row,4);
+    assert(area[2+6+7*16]==0xff0000);
+    assert(area[2+7+7*16]==0x00ff00);
+    assert(area[2+8+7*16]==0x0000ff);
+    assert(area[2+9+7*16]!=0xffffff); /* clipped right edge */
     fb_clip_clear(&s);
+    fb_blit565_row(&s,-2,0,row,4);
+    assert(area[2+0]==0x0000ff && area[2+1]==0xffffff);
     fb_rect(&s,0,0,1,1,0x778899);
     assert(area[2]==0x778899);
     puts("PASS: framebuffer clipping, text, RGB and sentinels");

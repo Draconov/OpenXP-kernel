@@ -43,6 +43,7 @@ For headless boot checks:
 ```bash
 make smoke          # Desktop boot markers over serial
 make smoke-deep     # Additional kernel and user-mode diagnostics
+make smoke-native   # Native GUI/RAM ABI probe in Ring 3
 ```
 
 GitHub Actions runs the build and tests and uploads available kernel/ISO build
@@ -95,7 +96,9 @@ installation**. This ISO starts OpenXP directly; it is not an installer.
 5. Click **Start**. If boot succeeds, OpenXP should display its experimental
    desktop, taskbar, and Start menu.
 
-The boot image is read-only and does not save files or settings across reboots.
+The default boot image is read-only. HOME files are writable in RAM but lost at reboot.
+A separate, opt-in dedicated experimental IDE disk build is described in
+[Storage](docs/STORAGE.md); it is not enabled in GitHub's standard ISO.
 USB input, Guest Additions, networking, shared folders, and disk installation
 are **not supported** by the current prototype.
 
@@ -116,48 +119,107 @@ For supported VM settings and optical-drive controls, see the
 
 </details>
 
+## Native application experiments
+
+OpenXP also bundles separate Ring 3 ELF64 applications. Open **Run** or
+**Terminal** and try `RUN BIN/CALCULATOR`, `RUN BIN/CLOCK`,
+`RUN BIN/NOTEPAD`, or `RUN BIN/CANVAS`. They now use independent bounded
+pixel surfaces instead of sharing the framebuffer or living inside the
+kernel. The original legacy app windows remain for compatibility.
+Actual concurrent Ring 3 GUI behavior must still be verified in a VM.
+See [Native applications](docs/NATIVE-APPS.md) for the developer ABI.
+
 ## Explore the desktop
 
-- **Start menu:** browse nine built-in desktop windows in two columns.
+- **Start menu:** browse fourteen built-in desktop windows in two columns.
 - **Windows:** focus, drag, minimize, close, or switch between open tools.
 - **Terminal:** type commands with a PS/2 keyboard or through the COM1 serial console.
-- **My Computer:** browse bundled read-only files and launch supported ELF64 examples.
-- **Notepad:** edit a RAM-only scratch document (up to 2,047 characters). No saving yet.
+- **My Computer:** browse boot files and temporary HOME documents; open saved texts and Paint images, and launch bundled ELF64 demos.
+- **Notepad:** edit text (2,047 characters); save and reopen a temporary `HOME/NOTEPAD.TXT` file.
+- **WordPad:** edit text (4,095 characters), adjust display, and save/reopen `HOME/WORDPAD.TXT` in RAM.
+- **Calendar:** navigate Gregorian months and years; highlights the VM RTC date when readable (timezone not guaranteed).
 - **Calculator:** basic nonnegative integer arithmetic, with keyboard and clickable buttons.
-- **Paint:** draw with an eight-color pencil on a 160 x 100 RAM-only canvas.
+- **Paint:** draw with an eight-color pencil on a 160 x 100 canvas and save/reopen `HOME/PAINTING.OXP` in RAM.
 - **System Monitor:** inspect uptime, available memory pages, and open windows.
 - **Appearance Settings:** choose from three wallpapers (not retained after reboot).
 - **Mines:** a 9 x 9 minefield with ten mines, first-click safety, flags and restart.
+- **Clock:** stopwatch and one-to-sixty-minute countdown timer with pause, reset and alert.
+- **Snake:** keyboard-controlled 20 x 14 grid game with food, scoring, pause and restart.
+- **Run:** XP-style launcher for bundled desktop programs and supported RAMDISK ELF demos.
 - **Taskbar:** switch between windows and view elapsed uptime (not wall-clock time).
 
 **Keyboard shortcuts:** `Win` or `Ctrl+Esc` opens Start; use arrow keys and
-`Enter` to choose an item. `Win+E` opens My Computer, `Win+R` opens Terminal,
+`Enter` to choose an item. `Win+E` opens My Computer, `Win+R` opens Run,
+`Win+T` opens Terminal, `Win+K` opens Clock, `Win+Y` opens Snake,
 `Win+D` toggles the desktop, `Win+N` opens Notepad, `Win+C` opens Calculator,
 `Win+P` opens Paint, `Win+M` opens System Monitor, `Win+S` opens Appearance,
-`Win+G` opens Mines, `Alt+Tab` switches windows, and `Alt+F4` closes
+`Win+G` opens Mines, `Win+W` opens WordPad, `Win+A` opens Calendar, `Alt+Tab` switches windows, and `Alt+F4` closes
 the active window. In Terminal, use `↑`/`↓` for history, `←`/`→` and
 `Home`/`End` to edit, `Ctrl+C` to clear the input line and `Ctrl+L` to clear
 the output. Notepad accepts text, Enter for line breaks, Home/End, arrow keys, Backspace,
-and Delete; `Ctrl+N` clears its in-memory document. Calculator uses digits,
+and Delete; `Ctrl+N` clears the text. In Notepad, WordPad and Paint, `Ctrl+S` saves and `Ctrl+O` opens their respective temporary HOME files. The built-in SAVE and OPEN buttons do the same. WordPad also supports `Ctrl+B` for bold display and the toolbar for text zoom. Calendar uses Left/Right for months, Up/Down for years and `T` to return to the VM date. In My Computer, use Enter to open a folder or file, and Backspace or the Up button to go back. Calculator uses digits,
 `+`, `-`, `*`, `/`, Enter (equals), and `C` (clear). In Paint, press `1`-`8`
 to choose a color or `X` to clear the image. In Mines, right-click (or hover
 and press `F`) to flag a square, and press `N` to start a new game.
-Appearance Settings accepts `1`-`3`. These are OpenXP shortcuts,
+Appearance Settings accepts `1`-`3`. Clock uses Space to start/pause,
+`R` to reset, `M` to change modes and `+`/`-` to adjust the countdown length.
+Snake uses arrow keys, Space to pause and `N` to restart. Run accepts program
+names such as `WORDPAD`, `WRITE`, `CALENDAR`, `CALC`, `SNAKE`, `CMD` or `BIN/HELLO`; it is not an
+arbitrary Windows `.exe` launcher. These are OpenXP shortcuts,
 not Windows compatibility features.
 
 **New terminal commands:** `LS`, `CAT`, `CLEAR`, `PWD`, `TREE`, `HISTORY`,
-`CALC 8 * 7`, `WHOAMI`, `HOSTNAME`, `UNAME`, `SYSINFO` and `APPS`, in addition
+`CALC 8 * 7`, `WHOAMI`, `HOSTNAME`, `UNAME`, `SYSINFO`, `APPS`, `COPY`,
+`REN` and `DEL`, in addition
 to `HELP`, `DIR`, `CD`, `TYPE`, `MEM`, `UPTIME`, `PS`, and `RUN BIN/HELLO`.
-Use `HELP` to see the command list. File access is read-only, and supported
-user-program output currently goes to COM1.
+Use `HELP` to see the command list. Terminal can inspect temporary files with
+`CD HOME`, `DIR`, and `TYPE NOTEPAD.TXT`/`TYPE WORDPAD.TXT`. Files are writable
+through the desktop applications; the shell can also copy, rename and delete
+existing `HOME` files (without overwriting destination files). All temporary files are
+**lost when the VM shuts down or reboots**. Persistent storage and disk drivers
+are still future work. Supported
+legacy `SYS_WRITE` output goes to COM1; native GUI programs write to their window.
 
 The desktop uses IRQ-driven PS/2 keyboard/mouse input when the legacy
 controller permits it, with a fallback polling mode. Dragging windows repaints
 only the affected framebuffer rectangle. Actual smoothness on VirtualBox and
 other hardware still needs hands-on testing.
 
-The desktop and its command interpreter run in **kernel mode**. They are not
-isolated graphical applications; ELF64 user-mode execution is experimental.
+## Native applications (experimental)
+
+OpenXP now builds **separate Ring 3 ELF64 executables** for a small native-app
+pilot. They are stored in the read-only boot archive, not linked into the
+kernel's desktop code. Unlike a Windows `.exe`, these use a restricted OpenXP
+ELF64 ABI. The original kernel-hosted desktop programs are retained so existing
+features do not disappear while the application platform matures.
+
+| Native file in My Computer | Launch from Terminal or Run | Controls |
+| --- | --- | --- |
+| `BIN/CALCULATOR` | `RUN BIN/CALCULATOR` | Digits, `+ - * / =`, `C` clear, Esc exit |
+| `BIN/CLOCK` | `RUN BIN/CLOCK` | Live uptime clock; Esc exit |
+| `BIN/NOTEPAD` | `RUN BIN/NOTEPAD` | Type, Backspace, Enter; Ctrl+S save and Ctrl+O reopen a RAM note |
+
+The native programs each have their own user memory and PID. Independent
+worker tasks launch them without blocking the desktop, and the GUI communicates
+with each program through checked system calls and a PID-owned event queue.
+`PS` now lists live process slots and their states; `RUN` acknowledges the
+launch request rather than claiming the program has already finished. Click the
+native window to focus it; use its `X` button or `Alt+F4` to request exit.
+
+**Current constraints:** up to **three native graphical windows** at a time,
+with separate PIDs, checked RGB565 drawing surfaces and focused input queues
+(host-tested; interactive VM verification outstanding). Native apps use
+scheduler-backed `GUI_WAIT` instead of busy-polling; the new
+`make smoke-native-wait` integration target checks the preemptible Ring 3 path.
+The read-only boot archive and writable RAM files now share a simple VFS path
+API. There are no general file handles, persistent default storage, installable
+programs, or reusable widget toolkit yet. Existing WordPad, Paint, games,
+window composition, and the desktop shell **still run in kernel mode**.
+None of this implies Windows `.exe` compatibility or full process isolation.
+
+For syscall definitions, native C sources, build instructions and migration
+status see [Native applications](docs/NATIVE-APPS.md).
+
 OpenXP does **not** support Windows programs or drivers.
 
 ## Documentation
@@ -167,7 +229,9 @@ OpenXP does **not** support Windows programs or drivers.
 | [Architecture](docs/ARCHITECTURE.md) | Kernel design, boot sequence, memory and scheduling |
 | [Desktop and input](docs/DESKTOP.md) | Controls, rendering, shell and limitations |
 | [Userspace](docs/USERSPACE.md) | ELF loader, process model and system calls |
+| [Experimental storage](docs/STORAGE.md) | Dedicated IDE disk test and safety rules |
 | [Roadmap](docs/ROADMAP.md) | Planned work, priorities and verification goals |
+| [VFS foundation](docs/VFS.md) | Read-only boot files, writable HOME namespace, and limitations |
 
 ## License
 

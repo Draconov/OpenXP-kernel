@@ -331,18 +331,25 @@ static void park_until_resumed(void) {
 #endif
 }
 
+bool scheduler_sleep_current_locked(uint64_t delay) {
+    if (!initialized || !preemptive || !local_irqs_disabled() || !delay ||
+        delay >= (UINT64_C(1) << 63)) return false;
+    struct thread *t = &tasks[current_slot];
+    if (t->state != RUNNING) return false;
+    t->wake_tick = last_tick + delay;
+    t->state = SLEEPING;
+    park_until_resumed();
+    return true;
+}
+
 bool scheduler_sleep_ticks(uint64_t delay) {
     if (!initialized || !preemptive || !irq_are_enabled() ||
         delay >= (UINT64_C(1) << 63)) return false;
     if (!delay) return true;
     uint64_t flags = irq_save_disable();
-    struct thread *t = &tasks[current_slot];
-    if (t->state != RUNNING) { irq_restore(flags); return false; }
-    t->wake_tick = last_tick + delay;
-    t->state = SLEEPING;
-    park_until_resumed();
+    bool slept = scheduler_sleep_current_locked(delay);
     irq_restore(flags);
-    return true;
+    return slept;
 }
 
 bool scheduler_park_current_locked(void) {

@@ -11,15 +11,30 @@ static bool filename(void *p,size_t idx,char *dst,size_t cap) { (void)p; assert(
 static size_t readtext(void *p,const char *path,char *dst,size_t cap) {
     (void)p;(void)path;assert(cap>6);strcpy(dst,"hello\n");return 6;
 }
+static bool psentry(void *p,size_t slot,uint64_t *pid,unsigned *state){
+    (void)p;
+    if(slot!=0)return false;
+    *pid=27;*state=2;return true;
+}
+static bool file_copy(void *ctx,const char *src,const char *dst){
+    (void)ctx;return strcmp(src,"home/a.txt")==0 && strcmp(dst,"home/b.txt")==0;
+}
+static bool file_rename(void *ctx,const char *src,const char *dst){
+    (void)ctx;return strcmp(src,"home/b.txt")==0 && strcmp(dst,"home/c.txt")==0;
+}
+static bool file_remove(void *ctx,const char *path){
+    (void)ctx;return strcmp(path,"home/c.txt")==0;
+}
 static bool run(void *p,const char *path) { (void)p; return strcmp(path,"bin/hello")==0; }
 int main(void) {
-    shell_t shell; shell_services_t svc={ticks,freepages,filecount,filename,run,readtext,NULL};
+    shell_t shell; shell_services_t svc={.ticks=ticks,.free_pages=freepages,.file_count=filecount,.file_name=filename,.run=run,.read_text=readtext,.process_entry=psentry,.file_copy=file_copy,.file_rename=file_rename,.file_remove=file_remove};
     shell_init(&shell,output,NULL,svc); assert(count==2);
     shell_execute(&shell,"dir"); assert(!strcmp(lines[3],"bin/hello"));
-    shell_execute(&shell,"mem"); assert(!strcmp(lines[5],"48"));
-    shell_execute(&shell,"uptime"); assert(!strcmp(lines[7],"123"));
-    shell_execute(&shell,"run bin/hello"); assert(strstr(lines[8],"successfully"));
-    shell_execute(&shell,"run missing"); assert(strstr(lines[9],"Could not"));
+    shell_execute(&shell,"ps"); assert(strstr(lines[count-1],"PID 27  RUNNING"));
+    shell_execute(&shell,"mem"); assert(!strcmp(lines[count-1],"48"));
+    shell_execute(&shell,"uptime"); assert(!strcmp(lines[count-1],"123"));
+    shell_execute(&shell,"run bin/hello"); assert(strstr(lines[count-1],"Launch requested"));
+    shell_execute(&shell,"run missing"); assert(strstr(lines[count-1],"Could not"));
     assert(shell_key(&shell,'A') && shell_key(&shell,'B'));
     assert(shell.used==2 && !strcmp(shell.input,"AB"));
     assert(shell_key(&shell,'\b') && shell.used==1);
@@ -35,6 +50,16 @@ int main(void) {
     shell_execute(&shell,"calc 1 - 3");assert(!strcmp(lines[count-1],"-2"));
     shell_execute(&shell,"calc 2 / 0");assert(strstr(lines[count-1],"zero"));
     shell_execute(&shell,"calc 2000000000 * 2");assert(strstr(lines[count-1],"Usage"));
+    shell_execute(&shell,"copy home/a.txt home/b.txt");
+    assert(strstr(lines[count-1],"copied"));
+    shell_execute(&shell,"copy home/a.txt");
+    assert(strstr(lines[count-1],"Usage"));
+    shell_execute(&shell,"ren home/b.txt home/c.txt");
+    assert(strstr(lines[count-1],"renamed"));
+    shell_execute(&shell,"del home/c.txt");
+    assert(strstr(lines[count-1],"deleted"));
+    shell_execute(&shell,"del home/missing");
+    assert(strstr(lines[count-1],"Cannot"));
     shell_execute(&shell,"sysinfo");assert(strstr(lines[count-1],"PS/2"));
     shell_execute(&shell,"apps");assert(strstr(lines[count-1],"Calculator"));
     shell_execute(&shell,"tree");assert(strstr(lines[count-1],"DIR"));

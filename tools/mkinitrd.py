@@ -53,14 +53,17 @@ def main() -> None:
     p.add_argument("output", type=pathlib.Path)
     p.add_argument("hello", type=pathlib.Path)
     p.add_argument("fault", type=pathlib.Path)
+    p.add_argument("native", nargs="*", type=pathlib.Path)
     args = p.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     entries = [("bin/hello", elf_from_flat(args.hello.read_bytes())),
                ("bin/fault", elf_from_flat(args.fault.read_bytes())),
-               ("docs/readme.txt", b"OpenXP 1.8.0 - Experimental desktop\n"
+               ("docs/readme.txt", b"OpenXP - Experimental desktop\n"
                 b"This RAM drive is read-only.\n"
                 b"Launch programs with RUN BIN/HELLO.\n"
                 b"Mouse and keyboard use legacy PS/2.\n")]
+    for app in args.native:
+        entries.append(("bin/" + app.stem, elf_from_flat(app.read_bytes())))
     args.output.write_bytes(pack_archive(entries))
 
 if __name__ == "__main__":

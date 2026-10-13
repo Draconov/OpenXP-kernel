@@ -14,10 +14,17 @@
 #include "sync/ipc.h"
 #include "arch/x86_64/timer.h"
 #include "arch/x86_64/irq_state.h"
+#include "arch/x86_64/rtc.h"
 #include "user/userspace.h"
 #include "fs/initrd.h"
+#include "fs/ramfs.h"
+#include "fs/vfs.h"
+#include "fs/persist.h"
+#include "drivers/ata_ide.h"
+#include "drivers/pci.h"
 #include "video/fb.h"
 #include "gui/desktop.h"
+#include "gui/native.h"
 #include "input/input.h"
 #include "user/process.h"
 
@@ -34,41 +41,110 @@ static desktop_t desktop;
 static input_device_t desktop_input;
 static uint64_t shell_ticks(void *ctx) {(void)ctx;return timer_ticks();}
 static uint64_t shell_free(void *ctx) {(void)ctx;return pmm_free_pages();}
-static size_t shell_count(void *ctx) {(void)ctx;return initrd_count();}
+static size_t shell_count(void *ctx) {(void)ctx;return vfs_count();}
 static bool shell_name(void *ctx,size_t index,char *buf,size_t cap) {
-    (void)ctx;return initrd_name_at(index,buf,cap);
+    (void)ctx;return vfs_name_at(index,buf,cap);
 }
 /* A cautious one-at-a-time app launcher; stdout is serial, not a GUI pipe.
  * Requires the existing process manager initialized during boot self-tests. */
 static size_t shell_read_text(void *ctx,const char *path,char *dst,size_t capacity) {
     (void)ctx;
-    const void *file=NULL;size_t n=0;
-    if(!initrd_lookup(path,&file,&n)||n>=capacity||!n)return 0;
-    const uint8_t *p=(const uint8_t *)file;
+    size_t n=0;
+    if(!capacity || !vfs_read(path,dst,capacity-1,&n) || !n)return 0;
     for(size_t i=0;i<n;++i)
-        if(p[i]!=10 && p[i]!=13 && (p[i]<32||p[i]>126))return 0;
-    for(size_t i=0;i<n;++i)dst[i]=(char)p[i];
-    dst[n]=0;return n;
+        if(dst[i]!=10 && dst[i]!=13 && (dst[i]<32 || dst[i]>126))return 0;
+    dst[n]=0;
+    return n;
+}
+/* Launch ELF files as separately scheduled Ring 3 tasks. The desktop never
+ * blocks waiting for an app to finish, so input and redraw remain responsive. */
+struct native_job { uint64_t pid; bool occupied; };
+#ifdef OPENXP_NATIVE_WAIT_SELFTEST
+static volatile uint64_t native_wait_test_pid;
+static volatile bool native_wait_test_done, native_wait_test_ok;
+#endif
+static struct native_job native_jobs[NATIVE_MAX_WINDOWS];
+static void native_worker(void *opaque) {
+    struct native_job *job=(struct native_job *)opaque;
+    uint64_t flags=irq_save_disable();
+    process_info_t info={0};
+    bool launched=process_run_preemptible(job->pid,&info);
+    native_owner_exit(job->pid);
+    if(!process_reap(job->pid) && !process_cancel_ready(job->pid))
+        serial_puts("OpenXP: native process cleanup failed\n");
+    if(!launched)serial_puts("OpenXP: native process launch failed\n");
+#ifdef OPENXP_NATIVE_WAIT_SELFTEST
+    if(job->pid==native_wait_test_pid) {
+        native_wait_test_ok=launched && info.state==PROCESS_EXITED && info.status==0;
+        native_wait_test_done=true;
+    }
+#endif
+    job->occupied=false;
+    irq_restore(flags);
 }
 static bool shell_launch(void *ctx,const char *path) {
     (void)ctx;
     const void *image=NULL;size_t bytes=0;
     if(!initrd_lookup(path,&image,&bytes))return false;
     uint64_t flags=irq_save_disable();
+    struct native_job *job=NULL;
+    for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+        if(!native_jobs[i].occupied){job=&native_jobs[i];break;}
+    if(!job){irq_restore(flags);return false;}
     uint64_t pid=process_create_elf(image,bytes);
-    bool passed=false;
-    if(pid) {
-        process_info_t result={0};
-        passed=process_run(pid,&result)&&result.state==PROCESS_EXITED&&result.status==0;
-        if(!process_reap(pid))passed=false;
+    if(!pid){irq_restore(flags);return false;}
+    job->pid=pid;job->occupied=true;
+    if(!scheduler_create(native_worker,job)) {
+        (void)process_cancel_ready(pid);
+        serial_puts("OpenXP: native thread allocation failed\n");
+        job->occupied=false;
+        irq_restore(flags);return false;
     }
     irq_restore(flags);
-    return passed;
+    return true;
 }
+static bool shell_process_entry(void *ctx,size_t slot,uint64_t *pid,unsigned *state){
+    (void)ctx;
+    if(!pid||!state)return false;
+    uint64_t flags=irq_save_disable();
+    process_info_t info={0};
+    bool ok=process_slot_info(slot,&info);
+    irq_restore(flags);
+    if(!ok)return false;
+    *pid=info.pid;*state=(unsigned)info.state;
+    return true;
+}
+static bool shell_file_copy(void *ctx,const char *from,const char *to){
+    (void)ctx;return vfs_copy(from,to);
+}
+static bool shell_file_rename(void *ctx,const char *from,const char *to){
+    (void)ctx;return vfs_rename(from,to);
+}
+static bool shell_file_remove(void *ctx,const char *path){
+    (void)ctx;return vfs_remove(path);
+}
+static void pci_report(void *ctx,const pci_device_t *d){
+    (void)ctx;
+    if(d->base_class!=2 && d->base_class!=3 && d->base_class!=4 &&
+       d->base_class!=0x0c && d->base_class!=1)return;
+    serial_puts("PCI present class=");serial_u64(d->base_class);
+    serial_puts(" subclass=");serial_u64(d->subclass);
+    serial_puts(" vendor=");serial_u64(d->vendor);
+    serial_puts(" device=");serial_u64(d->device);
+    serial_puts(" (inventory only; no driver loaded)\n");
+}
+static bool disk_attached;
+static uint64_t saved_ramfs_revision;
 static void desktop_interactive_loop(void) __attribute__((noreturn));
 static void desktop_interactive_loop(void) {
-    shell_services_t services={shell_ticks,shell_free,shell_count,shell_name,shell_launch,shell_read_text,NULL};
+    shell_services_t services={.ticks=shell_ticks,.free_pages=shell_free,.file_count=shell_count,
+        .file_name=shell_name,.run=shell_launch,.read_text=shell_read_text,
+        .process_entry=shell_process_entry,.file_copy=shell_file_copy,
+        .file_rename=shell_file_rename,.file_remove=shell_file_remove};
     desktop_init(&desktop,&desktop_fb,services);
+    native_reset();
+    rtc_date_t date;
+    if(rtc_read_date(&date))desktop_calendar_set_today(&desktop,date.year,date.month,date.day);
     input_state_init(&desktop_input,desktop_fb.width,desktop_fb.height);
     input_hardware_init();
     desktop_draw(&desktop);
@@ -77,9 +153,34 @@ static void desktop_interactive_loop(void) {
     serial_puts("OpenXP desktop: keyboard, mouse + COM1 terminal enabled\n");
     serial_puts("OPENXP_INPUT_OK\nOPENXP_GUI_OK\nOPENXP_SHELL_OK\nOPENXP_WM_OK\n");
     timer_enable();
+#ifdef OPENXP_NATIVE_WAIT_SELFTEST
+    /* Independently verify blocking from an actual preemptible CPL3 worker.
+     * The probe waits 3 PIT ticks and exits with a failure status on error. */
+    uint64_t test_flags=irq_save_disable();
+    bool started=shell_launch(0,"bin/probe");
+    if(started)native_wait_test_pid=native_jobs[0].pid;
+    irq_restore(test_flags);
+    if(!started){serial_puts("ERROR: GUI event wait probe launch failed\n");kernel_halt();}
+    uint64_t test_start=timer_ticks();
+    while(!native_wait_test_done && timer_ticks()-test_start<200u)
+        __asm__ volatile("pause" ::: "memory");
+    if(!native_wait_test_done || !native_wait_test_ok) {
+        serial_puts("ERROR: preemptive GUI_WAIT self-test failed\n");kernel_halt();
+    }
+    serial_puts("OPENXP_NATIVE_WAIT_OK\n");
+#endif
     uint64_t last_second=timer_ticks()/100u;
     for (;;) {
-        bool redraw=false;
+        /* Retired worker stacks must be reclaimed by the boot thread. */
+        uint64_t reap_flags=irq_save_disable();
+        (void)scheduler_reap();
+        native_window_t windows[NATIVE_MAX_WINDOWS];
+        for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)windows[i]=native_snapshot_slot(i);
+        bool native_changed=native_dirty_take();
+        irq_restore(reap_flags);
+        for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+            desktop_native_show(&desktop,i,windows[i].active);
+        bool redraw=native_changed;
         input_event_t event;
         /* Consume whole PS/2 packets rather than stopping after the first byte.
            Pure cursor movements restore only the cursor's 9x13 underlay; a
@@ -130,11 +231,24 @@ static void desktop_interactive_loop(void) {
             else redraw=true;
         }
         uint64_t now=timer_ticks();
+        /* Optional, explicitly enabled secondary IDE disk: commit snapshots
+         * at most every 2s. Never write to an unrecognized system disk. */
+#ifdef OPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE
+        if(disk_attached && (now%200u)==0u && ramfs_revision()!=saved_ramfs_revision) {
+            uint64_t revision=ramfs_revision();
+            if(persist_commit())saved_ramfs_revision=revision;
+        }
+#endif
+        uint64_t last_snake_step=desktop.snake_last_step;
         desktop_tick(&desktop,now);
+        if(!redraw && desktop.snake_last_step!=last_snake_step &&
+           desktop_top_window(&desktop)==DESKTOP_SNAKE &&
+           desktop.snake_started && !desktop.snake_paused)
+            desktop_redraw_active(&desktop);
         if(now/100u!=last_second) {
             last_second=now/100u;
             if(!redraw)desktop_redraw_taskbar(&desktop);
-            if(!redraw && desktop_top_window(&desktop)==DESKTOP_MONITOR)
+            if(!redraw && (desktop_top_window(&desktop)==DESKTOP_MONITOR || desktop_top_window(&desktop)==DESKTOP_CLOCK))
                 desktop_redraw_active(&desktop);
         }
         if(redraw)desktop_draw(&desktop);
@@ -480,9 +594,38 @@ void _start(void) {
     }
 #endif
     if (!initrd_mount(openxp_initrd_start, (size_t)(openxp_initrd_end - openxp_initrd_start)) ||
-        initrd_count() != 3) {
+        initrd_count() < 8) {
         serial_puts("ERROR: initrd validation failed\n"); kernel_halt();
     }
+    ramfs_reset();
+    disk_attached=false;
+#ifdef OPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE
+    persist_io_t disk_io={0};
+    if(ata_secondary_open(&disk_io)&&persist_mount(&disk_io)) {
+        disk_attached=true;
+        bool recovered=persist_restore();
+        serial_puts(recovered ? "OpenXP data disk: restored committed HOME snapshot\n" :
+                                "OpenXP data disk: fresh image or no valid snapshot\n");
+    }
+#endif
+    saved_ramfs_revision=ramfs_revision();
+    size_t pci_count=pci_enumerate(pci_config_read_io,0,pci_report,0);
+    serial_puts("OpenXP PCI devices discovered: ");serial_u64(pci_count);
+    serial_puts(" (read-only detection)\n");
+#ifdef OPENXP_NATIVE_SELFTEST
+    {
+        const void *image=0;size_t length=0;
+        uint64_t pages_before=pmm_free_pages();
+        process_info_t result={0};
+        if(!initrd_lookup("bin/probe",&image,&length))kernel_halt();
+        uint64_t pid=process_create_elf(image,length);
+        if(!pid||!process_run(pid,&result)||result.state!=PROCESS_EXITED||result.status!=0||
+           !process_reap(pid)||pmm_free_pages()!=pages_before) {
+            serial_puts("ERROR: native GUI syscall/RAM file selftest failed\n");kernel_halt();
+        }
+        serial_puts("OPENXP_NATIVE_ABI_OK\n");
+    }
+#endif
 #ifdef OPENXP_DEEP_SELFTEST
     if (!userspace_initrd_demo_run()) {
         serial_puts("ERROR: initrd ELF or fault isolation test failed\n"); kernel_halt();

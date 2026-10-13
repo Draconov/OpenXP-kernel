@@ -75,6 +75,7 @@ static const uint8_t *glyph(char c) {
     default:return symbols[13];
     }
 }
+const uint8_t *fb_glyph5x7(char ch){return glyph(ch);}
 bool fb_init(fb_surface_t *s,const struct limine_framebuffer *f) {
     if(!s||!f||!f->address||f->memory_model!=1||f->bpp!=32||f->width<320||f->height<240||
        f->width>4096||f->height>4096||f->pitch<f->width*4||f->pitch>INT32_MAX||
@@ -138,4 +139,25 @@ void fb_text_limit(fb_surface_t *s,int x,int y,const char *t,int limit,int scale
 }
 void fb_text(fb_surface_t *s,int x,int y,const char *t,int scale,uint32_t col) {
     fb_text_limit(s,x,y,t,256,scale,col);
+}
+
+void fb_blit565_row(fb_surface_t *s,int x,int y,const uint16_t *src,int n){
+    if(!s || !s->pixels || !src || n<=0 || y<0 || y>=s->height)return;
+    if(s->clip_active && (y<s->clip_y || y>=(int64_t)s->clip_y+s->clip_h))return;
+    int64_t left=x,right=(int64_t)x+n;
+    if(left<0)left=0;
+    if(right>s->width)right=s->width;
+    if(s->clip_active){
+        if(left<s->clip_x)left=s->clip_x;
+        if(right>(int64_t)s->clip_x+s->clip_w)right=(int64_t)s->clip_x+s->clip_w;
+    }
+    if(left>=right)return;
+    volatile uint32_t *out=(volatile uint32_t *)(s->pixels+(size_t)y*(size_t)s->pitch);
+    for(int64_t ix=left;ix<right;++ix){
+        uint16_t v=src[ix-x];
+        uint8_t r=(uint8_t)(((v>>11)&31u)*255u/31u);
+        uint8_t g=(uint8_t)(((v>>5)&63u)*255u/63u);
+        uint8_t b=(uint8_t)((v&31u)*255u/31u);
+        out[ix]=fb_rgb(s,r,g,b);
+    }
 }

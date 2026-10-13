@@ -31,6 +31,10 @@ uint64_t scheduler_last_tick(void);
 /* Requires preemptive mode and enabled IRQs; only from ordinary thread code.
  * A sleeper parks with sti;hlt;cli until its deadline and then resumes. */
 bool scheduler_sleep_ticks(uint64_t delay);
+/* Atomically arm a deadline and park while IF=0. Returns with IF=0.
+ * Used by event queues that must not race a condition-check and sleep.
+ * Never call from an IRQ, from a second CPU, or without timer preemption. */
+bool scheduler_sleep_current_locked(uint64_t delay);
 /* Manual blocking requires a different thread to wake this thread by ID. */
 bool scheduler_block_current(void);
 /* Atomic park: caller holds local IRQs disabled. On return IF remains off.

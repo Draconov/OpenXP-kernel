@@ -1,4 +1,5 @@
 #include "user/syscall.h"
+#include "gui/native.h"
 #include "mm/address_space.h"
 #include <string.h>
 #include <assert.h>
@@ -22,6 +23,9 @@ bool aspace_copy_from_user(const address_space_t *s, void *dst, uint64_t ptr, si
     return true;
 }
 
+bool aspace_copy_to_user(address_space_t *s,uint64_t dst,const void *src,size_t len) {
+    (void)s;(void)dst;(void)src;(void)len;return false;
+}
 uint64_t process_current_pid(void) { return active ? 17 : 0; }
 bool userspace_active(void) { return active; }
 void userspace_finish(uint64_t status) { exit_status = status; active = false; }
@@ -67,13 +71,52 @@ int main(void) {
     f.rax = OPENXP_SYS_TICKS;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == 1234);
+    native_reset();
+    f.rax = OPENXP_SYS_GUI_OPEN;
+    f.rdi = 999;f.rsi = 5;
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == (uint64_t)-OPENXP_EFAULT);
+    f.rdi = 1000;f.rsi = 5;
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == 0 && native_snapshot().active);
+    f.rax = OPENXP_SYS_GUI_TEXT;
+    f.rsi = 22;
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == 0 && !strcmp(native_snapshot().text,"Hello from user memory"));
+    f.rsi = 4096;
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == (uint64_t)-OPENXP_EINVAL);
+    f.rax=OPENXP_SYS_GUI_DRAW;
+    f.rdi=999;f.rsi=1;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rdi=1000;f.rsi=0;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rsi=NATIVE_DRAW_MAX+1;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EINVAL);
+    native_push_event('Q');
+    f.rax = OPENXP_SYS_GUI_EVENT;
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == 'Q');
+    r = user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == 0);
+    f.rax=OPENXP_SYS_GUI_WAIT;
+    f.rdi=UINT64_MAX;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rdi=0;
+    native_push_event('W');
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result=='W');
     f.rax = 0xffff;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == (uint64_t)-OPENXP_ENOSYS);
     f.rax = OPENXP_SYS_EXIT;
     f.rdi = 77;
     r = user_syscall_dispatch(&f);
-    assert(r.exit && exit_status == 77 && !active);
+    assert(r.exit && exit_status == 77 && !active && !native_snapshot().active);
     puts("PASS: syscall authorization, scalar ABI, exit, rejected requests");
     return 0;
 }

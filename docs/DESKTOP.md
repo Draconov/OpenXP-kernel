@@ -17,14 +17,18 @@ a protected userspace windowing system.
 | Taskbar | Reopen or switch built-in windows |
 | Terminal | Type commands, use Enter and Backspace |
 | Keyboard | Windows key opens Start; arrow keys and Enter select its items |
-| File browser | Inspect bundled read-only files and run supported ELF64 examples |
-| Notepad | Edit temporary RAM-only text; Ctrl+N starts a blank document |
+| File browser | Browse read-only boot files and temporary HOME files; open saved text or Paint images |
+| Notepad | Edit text, Ctrl+N for new, Ctrl+S/Ctrl+O to save/open a temporary HOME file |
+| WordPad | Editable text (4,095 chars), bold/zoom display, temporary HOME save/open |
+| Calendar | Gregorian month grid, date highlighting from guest CMOS RTC, keyboard and pointer controls |
 | Calculator | Four-operation integer arithmetic; buttons and keyboard |
-| Paint | Eight-color 160 x 100 RAM-only drawing surface; continuous brush strokes |
+| Paint | Eight-color 160 x 100 drawing surface with temporary HOME save/open |
 | System Monitor | Uptime, free 4 KiB pages and open window status (not a process list) |
 | Appearance | Three selectable wallpaper presets, reset at reboot |
 | Mines | 9 x 9, ten mines, guaranteed safe first click; right-click flags |
-| Clock | Displays uptime, not date or local time |
+| Clock & Stopwatch | Stopwatch and countdown timer driven by the monotonic 100 Hz PIT tick count |
+| Snake | Grid-based arcade game; use arrow keys, Space to pause, N to restart |
+| Run | Launch built-in program names, or try a supported bundled `bin/` ELF |
 
 Mouse and keyboard input use **legacy PS/2 IRQ1 and IRQ12** when i8042
 initialization succeeds. The interrupt handlers queue raw bytes; the foreground
@@ -40,18 +44,28 @@ console also feeds characters into the command interpreter. In QEMU, the normal
 | `Win` or `Ctrl+Esc` | Toggle the Start menu |
 | `↑` / `↓`, `Enter`, `Esc` | Navigate, launch, or dismiss the Start menu |
 | `Win+E` | Open My Computer |
-| `Win+R` | Open Terminal (not a Windows Run dialog) |
+| `Win+R` | Open the Run program launcher |
+| `Win+T` | Open Terminal |
+| `Win+K` | Open Clock |
+| `Win+Y` | Open Snake |
 | `Win+N` | Open Notepad |
 | `Win+C` | Open Calculator |
 | `Win+P` | Open Paint |
 | `Win+M` | Open System Monitor |
 | `Win+S` | Open Appearance Settings |
 | `Win+G` | Open Mines |
+| `Win+W` | Open WordPad |
+| `Win+A` | Open Calendar |
 | `1`-`8`, `X` in Paint | Select a palette color, clear the canvas |
 | `1`-`3` in Appearance | Select a wallpaper preset |
 | Right-click or hover + `F` in Mines | Flag/unflag a hidden cell |
 | `N` in Mines | Reset the board |
+| Space / `R` / `M` in Clock | Start/pause, reset, toggle stopwatch/timer |
+| `+` / `-` in Clock | Set countdown length from 1 to 60 minutes |
+| Arrow keys / Space / `N` in Snake | Steer, pause/resume, restart |
+| `Enter`, `Esc`, Backspace in Run | Launch, cancel, edit the entered command |
 | `Ctrl+N` in Notepad | Clear the in-memory text (no undo) |
+| `Ctrl+S` / `Ctrl+O` in Notepad, WordPad, Paint | Save/open that program's temporary HOME file |
 | `Win+D` | Show desktop; press again to restore windows |
 | `Alt+Tab` | Switch between open windows |
 | `Alt+F4` | Close the focused window |
@@ -61,15 +75,23 @@ console also feeds characters into the command interpreter. In QEMU, the normal
 | `Delete`, `Backspace` | Remove input characters |
 | `Ctrl+C` in Terminal | Clear the current input line (not clipboard copying) |
 | `Ctrl+L` in Terminal | Clear terminal scrollback |
-| `↑` / `↓`, `Enter` in My Computer | Select and attempt to launch a bundled program |
+| `↑` / `↓`, `Enter`, Backspace in My Computer | Navigate and open files or folders, go up a directory |
+| `Ctrl+B`, `Ctrl+N` in WordPad | Toggle bold display; start a blank RAM document |
+| `←` / `→`, `↑` / `↓`, `T` in Calendar | Previous/next month, next/previous year, return to VM date |
 
-Notepad holds up to 2,047 characters and cannot open or save documents;
-its contents disappear when the guest shuts down. Calculator handles
+Notepad holds up to 2,047 characters; `Ctrl+S` writes a RAM filesystem copy
+and `Ctrl+O` reopens it. Its saved file disappears when the guest shuts down. Calculator handles
 nonnegative integers and shows an error on divide-by-zero, negative answers,
-or overflow. Paint images and Appearance choices are also temporary; no saving
-or file export is implemented. Mines generates ten mines after the first click
-and protects that first cell. These desktop tools run in Ring 0, **not** in
-separate protected processes.
+or overflow. Paint images can be saved temporarily in HOME, but not exported to disk.
+Appearance choices are temporary as well. Mines generates ten mines after the first click
+and protects that first cell. Clock uses **uptime** rather than wall-clock
+or calendar time; its countdown does not play audio. Snake pauses its movement
+while another program is focused. Run recognizes selected built-in aliases such
+as `CMD`, `EXPLORER`, `CALC`, `CLOCK`, `SNAKE`, `NOTEPAD`, plus bundled paths
+such as `BIN/HELLO`; Windows executables are not supported. All these desktop
+tools run in Ring 0, **not** in separate protected processes.
+
+WordPad holds up to 4,095 ASCII characters; toolbar bold and zoom are document-wide display settings rather than rich-text formatting. Opening a text file from My Computer copies its contents into RAM; the original read-only archive is never modified. Calendar reads the PC CMOS RTC only to select and highlight a date; UTC/local timezone interpretation depends on VM configuration, and date changes during an active session are not currently polled. Calendar does not store appointments.
 
 The keyboard decoder currently assumes a US set-1 PS/2 layout. These shortcuts
 work only when the VM passes the keys to OpenXP. The Windows key might be
@@ -83,8 +105,8 @@ intercepted by host operating-system or VM keyboard settings.
 | `VER`, `UNAME` | Show basic kernel identification |
 | `CLS`, `CLEAR` | Clear Terminal output |
 | `ECHO hello` | Print text |
-| `DIR`, `LS` | List entries in the selected read-only folder |
-| `CD BIN`, `CD DOCS`, `CD ..` | Change between supported virtual folders |
+| `DIR`, `LS` | List boot and temporary RAM files |
+| `CD BIN`, `CD DOCS`, `CD HOME`, `CD ..` | Change between supported virtual folders |
 | `PWD` | Show current virtual directory |
 | `TREE` | Show the available virtual-folder structure |
 | `TYPE DOCS/README.TXT`, `CAT DOCS/README.TXT` | Read bundled text |
@@ -118,7 +140,7 @@ for window dragging. Paint also repaints just the rectangle touched by its
 brush; large changes still redraw more of the interface. The input subsystem
 buffers raw bytes in its IRQ handlers and processes them in the foreground;
 PS/2 polling is available as a fallback. The window manager currently handles
-nine fixed built-in windows, including the four new tools.
+fourteen fixed built-in windows.
 
 The implementation lives in `kernel/input/`, `kernel/video/`,
 `kernel/gui/desktop.c`, and `kernel/shell/`. It has no GPU acceleration,
@@ -137,3 +159,32 @@ Host tests validate isolated components but **do not confirm working guest
 input, drawing or application launches**. The desktop runs in Ring 0 and must
 not be treated as secure. Verification goals and other planned changes are in
 the [Roadmap](ROADMAP.md).
+
+## Native application window
+
+The Ring 3 application pilot supports up to three separate native text windows
+on top of the existing desktop. Launch `RUN BIN/CALCULATOR`, `RUN BIN/CLOCK` or
+`RUN BIN/NOTEPAD` from Terminal or Run, or select the program in My Computer.
+Its output arrives through a checked syscall and input is queued for the app.
+Native Notepad uses Ctrl+S and Ctrl+O for the temporary
+`HOME/NATIVE-NOTE.TXT` file. Separate native windows have individual PID-checked
+event queues. Focused keyboard input and client clicks are routed to the
+respective owner. Concurrent runtime behavior still requires VirtualBox/QEMU
+verification. Built-in graphical tools are still kernel-hosted. See [Native applications](NATIVE-APPS.md).
+
+## Temporary file operations
+
+The kernel-hosted Terminal provides `COPY HOME/A.TXT HOME/B.TXT`,
+`REN HOME/B.TXT HOME/C.TXT` and `DEL HOME/C.TXT`. These commands work only
+with RAM-backed `HOME` files, never the read-only boot archive or any disk.
+Copy and rename reject existing destination names and invalid paths. No
+folder creation, Save As dialog or persistent storage is available yet.
+
+## Experimental process-owned graphics
+
+`RUN BIN/CANVAS` launches a separate native process that renders a bounded
+RGB565 surface. Native Calculator, Clock and Notepad also use the same batched
+pixel/bitmap-glyph ABI. The Ring 0 desktop currently composes these surfaces
+into the native window slots. These native programs and their mouse/keyboard
+handling still require end-to-end VM verification. The older built-in tools
+remain available and are not yet migrated out of Ring 0.

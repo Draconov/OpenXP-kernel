@@ -17,14 +17,16 @@ Limine (BIOS / UEFI)
       ├─ Memory: physical pages, virtual mappings, heap
       ├─ CPU: GDT, TSS, IDT, exception and IRQ handlers
       ├─ Tasks: scheduler, PIT clock, wait queues, mutexes, IPC
-      ├─ Files: embedded read-only OXRD archive
+      ├─ Files: read-only OXRD archive + writable temporary RAM files
       ├─ Desktop: framebuffer, PS/2 input, shell, windows
       └─ Experimental Ring 3 runtime
           └─ Private address spaces, ELF64 loader, int 0x80 syscalls
 ```
 
-The desktop is **inside the kernel**. Ring 3 sample applications use a separate
-process path rather than a general GUI application platform.
+The desktop renderer/window manager is **inside the kernel**. Native user
+programs now have a deliberately narrow Ring 3 text-window and keyboard-event
+syscall bridge, but the old desktop programs remain kernel-hosted. The native
+application pilot is described in [Native applications](NATIVE-APPS.md).
 
 ## Boot sequence
 
@@ -83,8 +85,13 @@ replacement for SMP locks. Floating-point/SIMD task-state saving is absent.
 
 The build embeds a validated **OXRD** read-only RAM archive in the kernel image.
 `kernel/fs/initrd.[ch]` parses it; `tools/mkinitrd.py` creates it.
-It contains example ELF64 applications and a text document. There is no
-persistent storage or general filesystem API.
+It contains example ELF64 applications and a text document. A bounded RAM filesystem (`kernel/fs/ramfs.[ch]`) holds up to twelve temporary
+files with a maximum of 16 KiB each. The graphical Notepad, WordPad and Paint
+programs save fixed HOME filenames there; the My Computer window merges their
+names with the OXRD boot archive, and Terminal can read temporary text files.
+A narrowly scoped user API can read/write only `home/native-note.txt`;
+there are no general-purpose user filesystem handles yet.
+There is **no persistent disk storage**: all HOME files disappear on reboot.
 
 See [Userspace](USERSPACE.md) for executable formats, user memory boundaries,
 system calls and process lifecycle. See [Desktop](DESKTOP.md) for the input and
@@ -106,3 +113,33 @@ establish that an interrupt, privilege switch or GUI actually works in QEMU.
 
 All work that is **planned rather than implemented** is tracked in the
 [Roadmap](ROADMAP.md).
+
+## New native rendering and optional hardware groundwork
+
+Native ELF64 programs can submit bounded pixel drawing batches through syscall
+11. Each process has its own kernel-managed 320×180 RGB565 backing surface.
+The current Ring 0 desktop composes it into a clipped framebuffer window.
+The surface is not a shared writable user mapping and cannot be modified by a
+different PID. This is an intermediate architecture, **not a Ring 3 window
+server**. See [Native apps](NATIVE-APPS.md).
+
+OpenXP can enumerate legacy PCI configuration devices and classify potential
+storage, graphics, audio, network and USB controllers, but the associated
+hardware drivers remain unimplemented. An optional secondary IDE ATA PIO
+backend and host-tested snapshot journal exist for a **disposable test disk**
+only. The feature is disabled by default; see [Storage](STORAGE.md).
+
+## Native-event wait and virtual files
+
+`GUI_WAIT` atomically checks a PID-owned GUI queue and parks the calling
+single-CPU scheduler thread if no event is present. GUI delivery wakes it;
+positive timer deadlines permit periodic redraws without a busy loop.
+The process remains in Ring 3 between syscalls, but the GUI broker and
+window composition are still privileged kernel services. VM validation of
+this new syscall path is pending.
+
+The small `kernel/fs/vfs.c` layer unifies enumeration and path-based reads
+from OXRD with writable operations restricted to validated RAMFS `home/`
+paths. It is **not** an on-disk filesystem, nor a complete VFS with file
+handles or per-user permissions. The experimental IDE snapshot backend is
+kept opt-in, and default ISO images never write to an attached disk.

@@ -5,7 +5,8 @@ x86-64 ELF programs. It demonstrates a privilege boundary and separate process
 address spaces, but it is not a mature process system or a security boundary
 that has been verified under QEMU.
 
-The desktop and terminal still run in **Ring 0**.
+The desktop, terminal and legacy built-in applications still run in **Ring 0**.
+Small native applications use a separate Ring 3 GUI syscall interface.
 
 ## Process model
 
@@ -17,7 +18,9 @@ A process owns:
 - Exit or fault status, followed by explicit resource reclamation.
 
 The implementation provides a sequential runner with interrupts disabled and
-an **experimental** timer-preemptible runner for two demonstration processes.
+an **experimental** timer-preemptible runner for small numbers of processes.
+The desktop now allocates up to three Ring 3 launch workers, each owning its
+own text window. Parallel GUI execution still needs live VM verification.
 The latter switches CR3 and TSS RSP0 with the saved interrupt context. It must
 not be assumed safe until live CPU-level behavior is validated.
 
@@ -41,7 +44,8 @@ Dynamic linking, ELF interpreters, relocations, TLS and standard general-purpose
 PIE executables are unsupported. A failed load can leave partial mappings;
 the caller must destroy that address space rather than reusing it.
 
-The build packs `bin/hello`, `bin/fault` and a text file into the embedded
+The build packs `bin/hello`, `bin/fault`, native programs `bin/calculator`,
+`bin/clock`, `bin/notepad`, a native ABI probe, and a text file into the embedded
 **OXRD** archive. That archive has bounded paths, sizes and CRC32 checks, and
 is read-only; it is not a persistent disk filesystem.
 
@@ -69,6 +73,11 @@ passed through general-purpose registers (shown below).
 | `3` | `SYS_TICKS` | Read timer ticks |
 | `4` | `SYS_WRITE` | Write up to 1,024 validated user bytes to serial (`RDI` pointer, `RSI` length) |
 | `5` | `SYS_GETPID` | Return the current process ID |
+| `6` | `SYS_GUI_OPEN` | Open the native text window (`RDI` user title, `RSI` byte count); single-owner |
+| `7` | `SYS_GUI_TEXT` | Set native window text (`RDI` pointer, `RSI` byte count; max 383) |
+| `8` | `SYS_GUI_EVENT` | Poll one queued keyboard/close event, or zero if none |
+| `9` | `SYS_RAM_READ` | Read `home/native-note.txt` into user-writable memory, max 2048 bytes |
+| `10` | `SYS_RAM_WRITE` | Replace `home/native-note.txt` from user memory, max 2048 bytes |
 
 Invalid calls or invalid pointers return errors where applicable. This small
 ABI is internal to the prototype; it is **not** the Windows API.
@@ -82,8 +91,15 @@ make smoke-user-preempt     # Two timer-preempted user processes
 make smoke-user-fault       # Deliberate user fault
 make smoke-user-protection  # Rejected supervisor-memory access
 make smoke-initrd           # Packaged application and fault-recovery test
+make smoke-native           # Native GUI and RAM-file ABI probe
 ```
 
 These require Limine, Xorriso and QEMU. Until these paths successfully execute
 in a VM, the security and fault-isolation claims remain **unverified**. See the
 [Roadmap](ROADMAP.md) for verification and development priorities.
+
+## Native application SDK
+
+See [Native applications](NATIVE-APPS.md) for sample programs, the minimal
+freestanding user runtime, the build/linker script, and explicit current limits.
+The native ABI is unstable and the renderer/window manager remain privileged.

@@ -13,6 +13,11 @@ typedef struct {
     bool (*run)(void *ctx, const char *path);
     size_t (*read_text)(void *ctx,const char *path,char *dst,size_t capacity);
     void *ctx;
+    /* Optional diagnostic snapshot; false for vacant/out-of-range slots. */
+    bool (*process_entry)(void *ctx,size_t slot,uint64_t *pid,unsigned *state);
+    bool (*file_copy)(void *ctx,const char *from,const char *to);
+    bool (*file_rename)(void *ctx,const char *from,const char *to);
+    bool (*file_remove)(void *ctx,const char *path);
 } shell_services_t;
 
 typedef struct {

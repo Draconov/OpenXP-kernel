@@ -18,7 +18,7 @@ static void out(shell_t *s, const char *str) { if (s->output) s->output(s->outpu
 static void resolve(const shell_t *s,const char *src,char *dest,size_t cap) {
     size_t n=0;
     if (*src=='/'||*src=='\\') ++src;
-    else if(s->cwd[0] && !prefix(src,"bin/") && !prefix(src,"docs/")) {
+    else if(s->cwd[0] && !prefix(src,"bin/") && !prefix(src,"docs/") && !prefix(src,"home/")) {
         for(size_t j=0;s->cwd[j] && n+1<cap;++j)dest[n++]=s->cwd[j];
     }
     for(size_t j=0;src[j] && n+1<cap;++j) {
@@ -34,7 +34,7 @@ static void decimal(uint64_t n, char *buffer) {
 }
 static void listing(shell_t *s) {
     size_t count=s->services.file_count ? s->services.file_count(s->services.ctx):0;
-    out(s,"\nREAD-ONLY INITRD:");
+    out(s,"\nBOOT FILES + TEMPORARY RAM FILES:");
     unsigned listed=0;
     for (size_t i=0;i<count;++i) {
         char name[64];
@@ -45,9 +45,10 @@ static void listing(shell_t *s) {
     if (!listed) out(s,"(no files in this folder)");
 }
 static void tree(shell_t *s) {
-    out(s,"C:\\ (read-only initrd)");
+    out(s,"C:\\ (read-only boot files + writable RAM files)");
     out(s,"  BIN\\");
     out(s,"  DOCS\\");
+    out(s,"  HOME\\ (temporary)");
     out(s,"Use DIR to see available files.");
 }
 static bool parse_number(const char **text,uint64_t *value) {
@@ -90,6 +91,21 @@ static void calculator(shell_t *s,const char *expr) {
 invalid:
     out(s,"Usage: CALC 12 + 34   (operators: + - * /)");
 }
+/* Two whitespace-delimited file operands. No quoting or wildcard expansion.
+ * Invalid or extra operands cause a clean failure, never truncated paths. */
+static bool file_pair(const shell_t *s,const char *args,char *from,char *to,size_t cap){
+    char first[96],second[96];size_t a=0,b=0;
+    while(*args==' ')++args;
+    while(*args && *args!=' '){if(a+1>=sizeof(first))return false;first[a++]=*args++;}
+    first[a]=0;
+    while(*args==' ')++args;
+    while(*args && *args!=' '){if(b+1>=sizeof(second))return false;second[b++]=*args++;}
+    second[b]=0;
+    while(*args==' ')++args;
+    if(!a||!b||*args)return false;
+    resolve(s,first,from,cap);resolve(s,second,to,cap);
+    return *from&&*to;
+}
 static void history_store(shell_t *s,const char *cmd) {
     if(!*cmd)return;
     copy(s->history[s->history_next],cmd,sizeof(s->history[0]));
@@ -117,11 +133,11 @@ void shell_execute(shell_t *s, const char *cmd) {
         if(prefix(lower,"help ")) {
             out(s,"Commands: HELP VER CLS ECHO DIR CD TYPE RUN MEM UPTIME");
             out(s,"          PS PWD TREE HISTORY CALC WHOAMI HOSTNAME");
-            out(s,"          UNAME SYSINFO APPS EXIT");
+            out(s,"          UNAME SYSINFO APPS COPY REN DEL EXIT");
         } else {
             out(s,"HELP VER CLS ECHO DIR CD TYPE MEM UPTIME PS RUN EXIT");
             out(s,"Also: LS CAT CLEAR PWD TREE HISTORY CALC WHOAMI");
-            out(s,"      HOSTNAME UNAME SYSINFO APPS");
+            out(s,"      HOSTNAME UNAME SYSINFO APPS COPY REN DEL");
             out(s,"Try CALC 8 * 7, TREE, or RUN BIN/HELLO.");
         }
     } else if (same(lower,"ver") || same(lower,"uname")) {
@@ -137,8 +153,26 @@ void shell_execute(shell_t *s, const char *cmd) {
     } else if (same(lower,"tree")) {
         tree(s);
     } else if (same(lower,"ps")) {
-        out(s,"PID 0  KERNEL / DESKTOP");
-        out(s,"Process list is experimental (no background user apps)");
+        out(s,"PID 0  RUNNING  KERNEL / DESKTOP");
+        if (!s->services.process_entry) {
+            out(s,"Process listing not available.");
+        } else {
+            static const char *const states[]={"EMPTY","READY","RUNNING","EXITED","FAULTED"};
+            unsigned listed=0;
+            for(size_t slot=0;slot<16;++slot){
+                uint64_t pid=0;unsigned state=0;
+                if(!s->services.process_entry(s->services.ctx,slot,&pid,&state))continue;
+                char line[66],digits[24];decimal(pid,digits);
+                copy(line,"PID ",sizeof(line));
+                size_t pos=4,i=0;
+                while(digits[i]&&pos+1<sizeof(line))line[pos++]=digits[i++];
+                line[pos++]=' ';line[pos++]=' ';
+                const char *name=state<5?states[state]:"UNKNOWN";
+                i=0;while(name[i]&&pos+1<sizeof(line))line[pos++]=name[i++];
+                line[pos]=0;out(s,line);++listed;
+            }
+            if(!listed)out(s,"No independent user processes.");
+        }
     } else if (same(lower,"mem") || same(lower,"free")) {
         char num[24]; decimal(s->services.free_pages?s->services.free_pages(s->services.ctx):0,num);
         out(s,"FREE 4K PAGES:"); out(s,num);
@@ -148,6 +182,7 @@ void shell_execute(shell_t *s, const char *cmd) {
     } else if (same(lower,"pwd")) {
         if(s->cwd[0]=='b')out(s,"C:\\BIN");
         else if(s->cwd[0]=='d')out(s,"C:\\DOCS");
+        else if(s->cwd[0]=='h')out(s,"C:\\HOME");
         else out(s,"C:\\");
     } else if (same(lower,"whoami")) {
         out(s,"SYSTEM (kernel-hosted desktop)");
@@ -156,7 +191,8 @@ void shell_execute(shell_t *s, const char *cmd) {
     } else if (same(lower,"sysinfo")) {
         out(s,"OpenXP | x86-64 | freestanding kernel");
         out(s,"Graphics: software RGB framebuffer");
-        out(s,"Storage: read-only initrd; no disk driver");
+        out(s,"Storage: read-only boot files + temporary RAM files");
+        out(s,"RAM files disappear on reboot; no disk writes");
         out(s,"Input: legacy PS/2 keyboard and mouse");
     } else if (same(lower,"apps")) {
         out(s,"Built-in: Terminal, My Computer, About OpenXP");
@@ -178,7 +214,23 @@ void shell_execute(shell_t *s, const char *cmd) {
         char resolved[96];resolve(s,lower+4,resolved,sizeof(resolved));
         if (!*resolved || !s->services.run || !s->services.run(s->services.ctx,resolved))
             out(s,"Could not run executable (see serial console).");
-        else out(s,"Application finished successfully.");
+        else out(s,"Launch requested; use PS to inspect processes.");
+    } else if(prefix(lower,"copy ") || prefix(lower,"ren ")){
+        bool rename=prefix(lower,"ren ");
+        char from[96],to[96];
+        if(!file_pair(s,lower+(rename?4:5),from,to,sizeof(from))) {
+            out(s,"Usage: COPY source target  or  REN old new");
+        }else{
+            bool ok=rename?(s->services.file_rename&&
+                s->services.file_rename(s->services.ctx,from,to)):
+                (s->services.file_copy&&s->services.file_copy(s->services.ctx,from,to));
+            out(s,ok?(rename?"File renamed.":"File copied."):
+                  "Operation failed (RAM HOME files only; no overwrite).");
+        }
+    } else if(prefix(lower,"del ")){
+        char path[96];resolve(s,lower+4,path,sizeof(path));
+        out(s,s->services.file_remove&&s->services.file_remove(s->services.ctx,path)?
+              "File deleted.":"Cannot delete (RAM HOME files only).");
     } else if (prefix(lower,"cd ") || same(lower,"cd")) {
         const char *dest=same(lower,"cd")?"":lower+3;
         if(!*dest) {
@@ -189,6 +241,8 @@ void shell_execute(shell_t *s, const char *cmd) {
             copy(s->cwd,"bin/",sizeof(s->cwd));out(s,"C:\\BIN");
         } else if(same(dest,"docs")||same(dest,"docs/")||same(dest,"/docs")) {
             copy(s->cwd,"docs/",sizeof(s->cwd));out(s,"C:\\DOCS");
+        } else if(same(dest,"home")||same(dest,"home/")||same(dest,"/home")) {
+            copy(s->cwd,"home/",sizeof(s->cwd));out(s,"C:\\HOME (TEMP)");
         } else out(s,"Directory not found.");
     } else if (prefix(lower,"type ") || prefix(lower,"cat ")) {
         char resolved[96],buffer[512];

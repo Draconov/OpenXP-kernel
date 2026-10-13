@@ -209,6 +209,10 @@ int main(void) {
     fail_after = 2;
     assert(!process_create_elf("ok", 2) && frames == 0);
     fail_after = 0;
+    uint64_t cancelled = process_create_elf("cancel", 6);
+    assert(cancelled && frames>0);
+    assert(process_cancel_ready(cancelled) && frames==0);
+    assert(!process_cancel_ready(cancelled));
     uint64_t new_pid = process_create_elf("ok", 2);
     assert(new_pid > pids[PROCESS_MAX_SLOTS-1]);
     assert(process_run(new_pid, NULL) && process_reap(new_pid) && frames == 0);

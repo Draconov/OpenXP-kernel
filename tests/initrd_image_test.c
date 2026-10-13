@@ -36,17 +36,22 @@ int main(int argc, char **argv) {
     assert(data);
     assert(fread(data, 1, (size_t)n, file) == (size_t)n);
     assert(fclose(file) == 0);
-    assert(initrd_mount(data, (size_t)n) && initrd_count() == 3);
+    assert(initrd_mount(data, (size_t)n) && initrd_count() >= 8);
     verify_file("bin/hello");
     verify_file("bin/fault");
     char name[64];
-    assert(initrd_name_at(2,name,sizeof(name)) && !strcmp(name,"docs/readme.txt"));
-    assert(!initrd_name_at(3,name,sizeof(name)));
+    for(size_t i=0;i<initrd_count();++i)assert(initrd_name_at(i,name,sizeof(name)));
+    assert(!initrd_name_at(initrd_count(),name,sizeof(name)));
+    verify_file("bin/calculator");
+    verify_file("bin/clock");
+    verify_file("bin/notepad");
+    verify_file("bin/probe");
+    verify_file("bin/canvas");
     const void *text=NULL;size_t length=0;
     assert(initrd_lookup("docs/readme.txt",&text,&length) && length>20 &&
-           !memcmp(text,"OpenXP 1.8.0",12));
+           !memcmp(text,"OpenXP - Exp",12));
     initrd_unmount();
     free(data);
-    puts("PASS: built initrd archive contains two ELF64 programs plus desktop README");
+    puts("PASS: built initrd includes seven ELF64 executables and desktop README");
     return 0;
 }

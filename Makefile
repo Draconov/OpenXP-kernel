@@ -8,13 +8,13 @@ LIMINE_BRANCH ?= v10.x-binary
 EXTRA_CFLAGS ?=
 CFLAGS := -target x86_64-unknown-none-elf -std=c11 -O2 -g -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mcmodel=kernel -Wall -Wextra -Werror -Ikernel -MMD -MP $(EXTRA_CFLAGS)
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T kernel/linker.ld
-C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/user/userspace.c kernel/user/process.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
+C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/arch/x86_64/rtc.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/persist.c kernel/drivers/ata_ide.c kernel/drivers/pci.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/gui/native.c kernel/user/userspace.c kernel/user/process.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
 ASM_SOURCES := kernel/arch/x86_64/isr.S kernel/arch/x86_64/irq.S kernel/sched/switch.S kernel/user/entry.S kernel/user/demo.S kernel/fs/initrd_data.S
 OBJECTS := $(patsubst kernel/%.c,$(BUILD)/%.o,$(C_SOURCES)) $(patsubst kernel/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
 -include $(OBJECTS:.o=.d)
 ISO := $(BUILD)/openxp.iso
 
-.PHONY: smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
+.PHONY: kernel-storage iso-storage run-storage smoke-native smoke-native-wait smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
 all: iso
 kernel: $(BUILD)/openxp.elf
 $(BUILD)/%.o: kernel/%.c
@@ -28,8 +28,21 @@ $(BUILD)/apps/%.o: apps/%.S
 	$(CC) -target x86_64-unknown-none-elf -c $< -o $@
 $(BUILD)/apps/%.bin: $(BUILD)/apps/%.o
 	$(LD) -m elf_x86_64 --oformat binary -Ttext 0x100000 $< -o $@
-$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin tools/mkinitrd.py
-	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin
+NATIVE_APPS := calculator clock notepad probe canvas
+NATIVE_BINS := $(addprefix $(BUILD)/apps/,$(addsuffix .bin,$(NATIVE_APPS)))
+$(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -fno-pic -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/native_runtime.o: apps/native/runtime.c
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -fno-pic -mno-red-zone -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/native_start.o: apps/native/start.S
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -c $< -o $@
+$(BUILD)/apps/%.bin: $(BUILD)/apps/%.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o apps/native/app.ld
+	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $< $(BUILD)/apps/native_runtime.o -o $@
+$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) tools/mkinitrd.py
+	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS)
 $(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
 $(BUILD)/openxp.elf: $(OBJECTS) kernel/linker.ld
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
@@ -49,8 +62,22 @@ $(ISO): $(BUILD)/openxp.elf $(BOOTLOADER_DIR)/limine-bios.sys limine.conf
 iso: $(ISO)
 run: iso
 	qemu-system-x86_64 -m 512M -cdrom $(ISO) -serial stdio -no-reboot
+# Separate opt-in storage build. NEVER attach important host or VM disks.
+kernel-storage:
+	$(MAKE) BUILD=build/storage EXTRA_CFLAGS=-DOPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE kernel
+iso-storage:
+	$(MAKE) BUILD=build/storage EXTRA_CFLAGS=-DOPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE iso
+run-storage: iso-storage
+	@test -f build/openxp-data.img || python3 tools/mkstorage.py build/openxp-data.img
+	qemu-system-x86_64 -m 512M -cdrom build/storage/openxp.iso -serial stdio -no-reboot -drive if=ide,index=2,format=raw,file=build/openxp-data.img
 smoke: iso
 	bash scripts/smoke.sh $(ISO) OPENXP_BOOT_OK
+smoke-native:
+	$(MAKE) BUILD=build/native EXTRA_CFLAGS=-DOPENXP_NATIVE_SELFTEST iso
+	bash scripts/smoke.sh build/native/openxp.iso OPENXP_NATIVE_ABI_OK
+smoke-native-wait:
+	$(MAKE) BUILD=build/native-wait EXTRA_CFLAGS=-DOPENXP_NATIVE_WAIT_SELFTEST iso
+	bash scripts/smoke.sh build/native-wait/openxp.iso OPENXP_NATIVE_WAIT_OK
 smoke-deep:
 	$(MAKE) BUILD=build/deep EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
 	bash scripts/smoke.sh build/deep/openxp.iso OPENXP_DEEP_OK
@@ -86,6 +113,19 @@ smoke-guard:
 	bash scripts/smoke.sh build/guard/openxp.iso OPENXP_GUARD_OK
 
 test-unit: test-desktop $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
+	build/tests/native_wait_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
+	build/tests/vfs_test $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_test
+	build/tests/pci_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_test
+	build/tests/persist_test
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_window_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_test
+	build/tests/native_window_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/ramfs_test
+	build/tests/ramfs_test
 	@mkdir -p build/tests
 	python3 -m unittest discover -s tests -p 'test_*.py'
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_test
@@ -94,7 +134,7 @@ test-unit: test-desktop $(BUILD)/initrd.img
 	build/tests/initrd_image_test $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c -o build/tests/process_manager_test
 	build/tests/process_manager_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/syscall_test.c kernel/user/syscall.c -o build/tests/syscall_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/gui/native.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_test
 	build/tests/syscall_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
 	build/tests/process_test
@@ -125,13 +165,26 @@ test-unit: test-desktop $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
 	build/tests/sync_test
 
-test-sanitize: test-desktop-sanitize
+test-sanitize: test-desktop-sanitize $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
+	build/tests/native_wait_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
+	build/tests/vfs_sanitized $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_sanitized
+	build/tests/pci_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_sanitized
+	build/tests/persist_sanitized
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_window_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_sanitized
+	build/tests/native_window_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/ramfs_sanitized
+	build/tests/ramfs_sanitized
 	@mkdir -p build/tests
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_sanitized
 	build/tests/initrd_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c -o build/tests/process_manager_sanitized
 	build/tests/process_manager_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/syscall_test.c kernel/user/syscall.c -o build/tests/syscall_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/gui/native.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_sanitized
 	build/tests/syscall_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
 	build/tests/process_sanitized
@@ -167,7 +220,7 @@ test-desktop:
 	build/tests/fb_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_test
 	build/tests/input_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/shell/shell.c kernel/video/fb.c -o build/tests/desktop_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_test
 	build/tests/desktop_test
 
 test-desktop-sanitize:
@@ -178,7 +231,7 @@ test-desktop-sanitize:
 	build/tests/fb_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_sanitized
 	build/tests/input_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/shell/shell.c kernel/video/fb.c -o build/tests/desktop_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_sanitized
 	build/tests/desktop_sanitized
 
 clean:

@@ -37,6 +37,8 @@ bool process_run_preemptible(uint64_t pid, process_info_t *result);
 /* Called by the assembly return trampoline after EXIT/fault. */
 uint64_t process_current_resume_sp(void);
 bool process_get_info(uint64_t pid, process_info_t *info);
+/* Enumerate a process slot for diagnostic tools; IRQs must be disabled. */
+bool process_slot_info(size_t slot, process_info_t *info);
 /* Wait on the boot/controller thread with IF=1 and timer preemption active.
  * Sleeps for one PIT tick between checks. Return false on timeout, missing
  * PID, invalid context or failure to park; result is unchanged on failure.
@@ -45,6 +47,8 @@ bool process_wait_ticks(uint64_t pid, uint64_t max_ticks, process_info_t *result
 bool process_state_terminal(process_state_t state);
 /* Release all mapped user pages, page tables, and guarded kernel stack. */
 bool process_reap(uint64_t pid);
+/* Cancel a READY process that has never run (e.g. failed worker creation). */
+bool process_cancel_ready(uint64_t pid);
 uint64_t process_current_pid(void);
 const address_space_t *process_current_space(void);
 /* Only valid from a currently running ring-3 process's synchronous syscall. */

@@ -204,6 +204,13 @@ bool process_get_info(uint64_t pid, process_info_t *info) {
     *info = p->info;
     return true;
 }
+bool process_slot_info(size_t slot, process_info_t *info) {
+    if (!initialized || slot >= PROCESS_MAX_SLOTS || !info ||
+        !interrupts_masked() || processes[slot].info.state == PROCESS_EMPTY)
+        return false;
+    *info = processes[slot].info;
+    return true;
+}
 uint64_t process_current_pid(void) {
     struct process *p = running_here();
     return p ? p->info.pid : 0;
@@ -307,6 +314,14 @@ bool process_reap(uint64_t pid) {
         p->owner_thread || (p->info.state != PROCESS_EXITED && p->info.state != PROCESS_FAULTED)) return false;
     /* A successful reap frees its PID, ELF image, user stack, page tables,
      * kernel transition stack and both unmapped kernel guard pages. */
+    discard(p);
+    return true;
+}
+
+bool process_cancel_ready(uint64_t pid) {
+    struct process *p=lookup(pid);
+    if(!initialized || !interrupts_masked() || !p || p->owner_thread ||
+       p->info.state!=PROCESS_READY)return false;
     discard(p);
     return true;
 }
