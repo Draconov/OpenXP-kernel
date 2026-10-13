@@ -54,11 +54,23 @@ int main(int argc, char **argv) {
     verify_file("bin/notepad");
     verify_file("bin/probe");
     verify_file("bin/canvas");
+    assert(initrd_count()==22);
+    verify_file("bin/calendar");
+    verify_file("bin/snake");
+    verify_file("bin/mines");
+    verify_file("bin/monitor");
+    verify_file("bin/about");
+    verify_file("bin/paint");
+    verify_file("bin/wordpad");
+    verify_file("bin/terminal");
+    verify_file("bin/filemanager");
+    verify_file("bin/run");
+    verify_file("bin/settings");
     const void *text=NULL;size_t length=0;
     assert(initrd_lookup("docs/readme.txt",&text,&length) && length>20 &&
            !memcmp(text,"OpenXP - Exp",12));
     initrd_unmount();
     free(data);
-    puts("PASS: built initrd includes seven ELF64 executables and desktop README");
+    puts("PASS: built initrd contains nineteen ELF64 apps and desktop README");
     return 0;
 }

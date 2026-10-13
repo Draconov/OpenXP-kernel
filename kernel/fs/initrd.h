@@ -6,7 +6,7 @@
 
 /* Minimal read-only OXRD v1 archive. Every file is checksummed at mount.
  * All names are relative ASCII paths without traversal segments. */
-#define INITRD_MAX_FILES 16u
+#define INITRD_MAX_FILES 32u
 #define INITRD_MAX_SIZE (1024u * 1024u)
 bool initrd_mount(const void *data, size_t length);
 bool initrd_lookup(const char *path, const void **data, size_t *length);

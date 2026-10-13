@@ -18,10 +18,11 @@ bool shell_bridge_active(void);
 bool shell_bridge_menu_open(void);
 bool shell_bridge_submit(uint64_t pid,const oxp_shell_draw_t *commands,uint32_t count,uint64_t tick);
 void shell_bridge_compose(fb_surface_t *target);
+void shell_bridge_compose_background(fb_surface_t *target);
 void shell_bridge_notify_focus(uint32_t index);
 bool shell_bridge_route(const input_event_t *event,bool menu_visible,int height);
 bool shell_bridge_pop(oxp_shell_event_t *event);
-bool shell_bridge_action(uint32_t action,uint32_t index);
+bool shell_bridge_action(uint32_t action,uint32_t index,uint64_t payload);
 bool shell_bridge_window(uint32_t index,oxp_shell_window_t *out);
 #ifdef OPENXP_SHELL_HOST_TEST
 unsigned shell_bridge_test_pending(void);

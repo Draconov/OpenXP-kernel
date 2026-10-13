@@ -122,7 +122,19 @@ bool desktop_shell_close(desktop_t *d){
 void desktop_shell_desktop(desktop_t *d){if(d)show_desktop(d);}
 bool desktop_shell_open(desktop_t *d,uint32_t index){
     if(!d||index>=DESKTOP_NATIVE)return false;
-    open_window(d,(int)index);return true;
+    /* Service-controlled launch; old built-in is the safe fallback. */
+    /* Only switch Start-menu entries when the native replacement already
+       covers the everyday controls. Other ELF pilots remain launchable via
+       RUN BIN/NAME until they reach behavioral parity. */
+    bool preferred=index==DESKTOP_NOTEPAD || index==DESKTOP_CALCULATOR ||
+                   index==DESKTOP_MINES || index==DESKTOP_SNAKE ||
+                   index==DESKTOP_CALENDAR || index==DESKTOP_PAINT ||
+                   index==DESKTOP_WORDPAD || index==DESKTOP_TERMINAL ||
+                   index==DESKTOP_FILES || index==DESKTOP_RUN ||
+                   index==DESKTOP_SETTINGS;
+    if(!preferred || !desktop_shell_launch_native(d,index))
+        open_window(d,(int)index);
+    return true;
 }
 bool desktop_shell_task(desktop_t *d,uint32_t index){
     if(!d||index>=DESKTOP_WINDOWS||!d->windows[index].open)return false;
@@ -133,6 +145,46 @@ bool desktop_shell_task(desktop_t *d,uint32_t index){
 bool desktop_shell_focus(desktop_t *d,uint32_t index){
     if(!d||index>=DESKTOP_WINDOWS||!d->windows[index].open)return false;
     d->windows[index].minimized=false;focus(d,(int)index);return true;
+}
+bool desktop_shell_launch_native(desktop_t *d,uint32_t index){
+    if(!d || !d->shell.services.run)return false;
+    /* No user-controlled executable path reaches the privileged launcher.
+       Only built-in, immutable ELF images are accepted. The existing desktop
+       remains a fallback if a native application cannot be created. */
+    const char *path=NULL;
+    if(index==DESKTOP_CALCULATOR)path="bin/calculator";
+    else if(index==DESKTOP_NOTEPAD)path="bin/notepad";
+    else if(index==DESKTOP_CLOCK)path="bin/clock";
+    else if(index==DESKTOP_CALENDAR)path="bin/calendar";
+    else if(index==DESKTOP_SNAKE)path="bin/snake";
+    else if(index==DESKTOP_MINES)path="bin/mines";
+    else if(index==DESKTOP_MONITOR)path="bin/monitor";
+    else if(index==DESKTOP_ABOUT)path="bin/about";
+    else if(index==DESKTOP_PAINT)path="bin/paint";
+    else if(index==DESKTOP_WORDPAD)path="bin/wordpad";
+    else if(index==DESKTOP_TERMINAL)path="bin/terminal";
+    else if(index==DESKTOP_FILES)path="bin/filemanager";
+    else if(index==DESKTOP_RUN)path="bin/run";
+    else if(index==DESKTOP_SETTINGS)path="bin/settings";
+    if(!path)return false;
+    /* Do not report success if no native window slot can be allocated;
+       callers may then show the existing kernel-hosted implementation. */
+    unsigned active=0;
+    for(unsigned slot=0;slot<NATIVE_MAX_WINDOWS;++slot)
+        if(native_snapshot_slot(slot).active)++active;
+    if(active==NATIVE_MAX_WINDOWS)return false;
+    return d->shell.services.run(d->shell.services.ctx,path);
+}
+bool desktop_shell_move(desktop_t *d,uint32_t index,uint32_t x,uint32_t y){
+    if(!d || !d->surface || index>=DESKTOP_WINDOWS ||
+       !d->windows[index].open || d->windows[index].minimized)return false;
+    desktop_window_t *w=&d->windows[index];
+    /* No arithmetic overflow or off-screen movement. The untrusted shell
+       selects geometry, but the trusted desktop validates its bounds. */
+    if(x>(uint32_t)d->surface->width || y>(uint32_t)d->surface->height ||
+       (uint32_t)w->w>(uint32_t)d->surface->width-x ||
+       (uint32_t)w->h+42u>(uint32_t)d->surface->height-y)return false;
+    w->x=(int)x;w->y=(int)y;return true;
 }
 const char *desktop_shell_title(desktop_t *d,uint32_t index){
     if(!d||index>=DESKTOP_WINDOWS)return "";
@@ -1294,11 +1346,20 @@ void desktop_cursor_update(desktop_t *d) {
 void desktop_draw(desktop_t *d) {
     /* A complete repaint overwrites the old cursor and its underlay. */
     d->cursor_painted=false;
-    draw_wallpaper(d);draw_icons(d);
+    /* Ring 3 selects the wallpaper and icon composition when its display
+       list is live. Retain the legacy renderer as a crash fallback. */
+#ifndef OPENXP_WM_HOST_TEST
+    if(shell_bridge_active())shell_bridge_compose_background(d->surface);
+    else
+#endif
+    {draw_wallpaper(d);draw_icons(d);}
     int top=desktop_top_window(d);
     for(int z=0;z<DESKTOP_WINDOWS;++z)
         draw_window(d,d->order[z],d->order[z]==top);
-    draw_taskbar(d);draw_menu(d);
+#ifndef OPENXP_WM_HOST_TEST
+    if(!shell_bridge_active())
+#endif
+    {draw_taskbar(d);draw_menu(d);}
 #ifndef OPENXP_WM_HOST_TEST
     shell_bridge_compose(d->surface);
 #endif
@@ -1315,11 +1376,18 @@ void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index) {
     fb_surface_t *s=d->surface;
     cursor_restore(d);
     fb_clip_set(s,x0-1,y0-1,x1-x0+w->w+7,y1-y0+w->h+7);
-    draw_wallpaper(d);draw_icons(d);
+#ifndef OPENXP_WM_HOST_TEST
+    if(shell_bridge_active())shell_bridge_compose_background(d->surface);
+    else
+#endif
+    {draw_wallpaper(d);draw_icons(d);}
     int top=desktop_top_window(d);
     for(int z=0;z<DESKTOP_WINDOWS;++z)
         draw_window(d,d->order[z],d->order[z]==top);
-    draw_taskbar(d);draw_menu(d);
+#ifndef OPENXP_WM_HOST_TEST
+    if(!shell_bridge_active())
+#endif
+    {draw_taskbar(d);draw_menu(d);}
 #ifndef OPENXP_WM_HOST_TEST
     shell_bridge_compose(d->surface);
 #endif
@@ -1365,6 +1433,15 @@ void desktop_redraw_paint(desktop_t *d){
 void desktop_redraw_terminal(desktop_t *d){
     if(d && desktop_top_window(d)==DESKTOP_TERMINAL)desktop_redraw_active(d);
 }
+static void open_preferred(desktop_t *d,int id){
+#ifndef OPENXP_WM_HOST_TEST
+    if((id==DESKTOP_NOTEPAD || id==DESKTOP_CALCULATOR ||
+        id==DESKTOP_MINES || id==DESKTOP_SNAKE ||
+        id==DESKTOP_CALENDAR) &&
+       desktop_shell_launch_native(d,(uint32_t)id))return;
+#endif
+    open_window(d,id);
+}
 static void desktop_click(desktop_t *d,int x,int y) {
     int h=d->surface->height;
     if(y>=h-42) {
@@ -1389,7 +1466,7 @@ static void desktop_click(desktop_t *d,int x,int y) {
         int top=h-42-370;
         for(int i=0;i<DESKTOP_NATIVE;++i) {
             if(inside(x,y,12+(i/7)*245,top+51+(i%7)*43,230,40)) {
-                open_window(d,i);break;
+                open_preferred(d,i);break;
             }
         }
         d->start_open=false;return;
@@ -1548,7 +1625,14 @@ void desktop_mouse(desktop_t *d,int x,int y,bool down) {
 }
 void desktop_right_mouse(desktop_t *d,int x,int y,bool down){
     if(!d)return;
-    if(down && !d->right_down && desktop_top_window(d)==DESKTOP_MINES)
+    if(down && !d->right_down && desktop_top_window(d)>=DESKTOP_NATIVE){
+        int top=desktop_top_window(d);
+        desktop_window_t *w=&d->windows[top];
+        if(inside(x,y,w->x,w->y,w->w,w->h))
+            native_push_event_slot((unsigned)(top-DESKTOP_NATIVE),
+                NATIVE_EVENT_RIGHT_CLICK | (((unsigned)(x-w->x)&1023u)<<10) |
+                ((unsigned)(y-w->y)&1023u));
+    }else if(down && !d->right_down && desktop_top_window(d)==DESKTOP_MINES)
         mine_toggle_flag(d,mine_cell_at(d,x,y));
     d->right_down=down;
 }
@@ -1604,17 +1688,17 @@ void desktop_key_event(desktop_t *d,const input_event_t *event) {
         case 'e':open_window(d,DESKTOP_FILES);d->start_open=false;return;
         case 'r':open_window(d,DESKTOP_RUN);d->start_open=false;return;
         case 't':open_window(d,DESKTOP_TERMINAL);d->start_open=false;return;
-        case 'k':open_window(d,DESKTOP_CLOCK);d->start_open=false;return;
-        case 'y':open_window(d,DESKTOP_SNAKE);d->start_open=false;return;
+        case 'k':open_preferred(d,DESKTOP_CLOCK);d->start_open=false;return;
+        case 'y':open_preferred(d,DESKTOP_SNAKE);d->start_open=false;return;
         case 'w':open_window(d,DESKTOP_WORDPAD);d->start_open=false;return;
-        case 'a':open_window(d,DESKTOP_CALENDAR);d->start_open=false;return;
+        case 'a':open_preferred(d,DESKTOP_CALENDAR);d->start_open=false;return;
         case 'd':show_desktop(d);return;
-        case 'n':open_window(d,DESKTOP_NOTEPAD);d->start_open=false;return;
-        case 'c':open_window(d,DESKTOP_CALCULATOR);d->start_open=false;return;
+        case 'n':open_preferred(d,DESKTOP_NOTEPAD);d->start_open=false;return;
+        case 'c':open_preferred(d,DESKTOP_CALCULATOR);d->start_open=false;return;
         case 'p':open_window(d,DESKTOP_PAINT);d->start_open=false;return;
-        case 'm':open_window(d,DESKTOP_MONITOR);d->start_open=false;return;
+        case 'm':open_preferred(d,DESKTOP_MONITOR);d->start_open=false;return;
         case 's':open_window(d,DESKTOP_SETTINGS);d->start_open=false;return;
-        case 'g':open_window(d,DESKTOP_MINES);d->start_open=false;return;
+        case 'g':open_preferred(d,DESKTOP_MINES);d->start_open=false;return;
         default: break;
         }
     }
@@ -1671,7 +1755,11 @@ void desktop_key_event(desktop_t *d,const input_event_t *event) {
             else if(lc=='o')native_push_event_slot(slot,NATIVE_EVENT_OPEN);
             return;
         }
-        if(event->code==KEY_ENTER)native_push_event_slot(slot,'\n');
+        if(event->code==KEY_UP)native_push_event_slot(slot,NATIVE_EVENT_UP);
+        else if(event->code==KEY_DOWN)native_push_event_slot(slot,NATIVE_EVENT_DOWN);
+        else if(event->code==KEY_LEFT)native_push_event_slot(slot,NATIVE_EVENT_LEFT);
+        else if(event->code==KEY_RIGHT)native_push_event_slot(slot,NATIVE_EVENT_RIGHT);
+        else if(event->code==KEY_ENTER)native_push_event_slot(slot,'\n');
         else if(event->code==KEY_BACKSPACE)native_push_event_slot(slot,8);
         else if(event->code==KEY_ESCAPE)native_push_event_slot(slot,27);
         else if(event->code==KEY_CHARACTER && !(mods&(KEYMOD_CTRL|KEYMOD_ALT|KEYMOD_WIN)) && (unsigned char)c>=32)

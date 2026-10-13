@@ -36,6 +36,13 @@ int main(int argc, char **argv) {
     char out[16]={0};
     assert(vfs_read("home/note.txt",out,sizeof(out),&file_len));
     assert(file_len==5&&!memcmp(out,"Hello",5));
+    assert(vfs_copy("docs/readme.txt","home/readme-copy.txt"));
+    assert(vfs_kind("home/readme-copy.txt")==VFS_HOME_WRITABLE);
+    assert(vfs_read("home/readme-copy.txt",docs,sizeof(docs),&file_len));
+    assert(file_len>0);
+    assert(!vfs_copy("docs/readme.txt","home/readme-copy.txt"));
+    assert(!vfs_copy("docs/readme.txt","bin/overwrite"));
+    assert(!vfs_copy("bin/unknown","home/nope"));
     assert(vfs_copy("home/note.txt","home/copy.txt"));
     assert(!vfs_copy("home/note.txt","home/copy.txt"));
     assert(vfs_rename("home/copy.txt","home/new.txt"));

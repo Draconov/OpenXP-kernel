@@ -2,6 +2,7 @@
 #define OPENXP_NATIVE_APP_H
 #include <stdint.h>
 #include <stddef.h>
+#include "../../kernel/user/app_file.h"
 #define OXP_DRAW_FILL 1u
 #define OXP_DRAW_CLEAR 2u
 #define OXP_DRAW_GLYPH 3u
@@ -12,6 +13,11 @@ typedef struct { uint32_t op,x,y,w,h,color; } oxp_draw_cmd_t;
 #define OXP_SAVE 0x10001u
 #define OXP_OPEN 0x10002u
 #define OXP_CLICK 0x80000000u
+#define OXP_RIGHT_CLICK 0x40000000u
+#define OXP_UP 0x10003u
+#define OXP_DOWN 0x10004u
+#define OXP_LEFT 0x10005u
+#define OXP_RIGHT 0x10006u
 static inline unsigned oxp_click_x(uint32_t e){return (e >> 10) & 1023u;}
 static inline unsigned oxp_click_y(uint32_t e){return e & 1023u;}
 static inline uint64_t oxp_call(uint64_t id,uint64_t a,uint64_t b) {
@@ -63,6 +69,20 @@ static inline int oxp_label(unsigned x,unsigned y,const char *text,unsigned scal
         if(used==24){if(oxp_draw(cmd,used))return -1;used=0;}
     }
     return used?oxp_draw(cmd,used):0;
+}
+static inline int64_t oxp_file(unsigned op,app_file_request_t *req){
+    return (int64_t)oxp_call(27,op,(uint64_t)req);
+}
+static inline int64_t oxp_launch(const char *path){
+    return (int64_t)oxp_call(28,(uint64_t)path,oxp_len(path));
+}
+static inline void oxp_copy(char *dst,const char *src,size_t cap){
+    if(!cap)return;size_t i=0;while(i+1<cap && src[i]){dst[i]=src[i];++i;}dst[i]=0;
+}
+static inline int oxp_hit(uint32_t e,unsigned x,unsigned y,unsigned w,unsigned h){
+    if(!(e&(OXP_CLICK|OXP_RIGHT_CLICK)))return 0;
+    unsigned ex=oxp_click_x(e),ey=oxp_click_y(e);
+    return ex>=x+16 && ey>=y+43 && ex-x-16<w && ey-y-43<h;
 }
 static inline uint32_t oxp_event(void){return (uint32_t)oxp_call(8,0,0);}
 /* Zero waits for an event without a deadline. For periodic refresh pass a

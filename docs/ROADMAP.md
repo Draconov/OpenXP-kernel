@@ -51,8 +51,10 @@ preemption, protection or hardware input are correct.
 - [ ] Build robust asynchronous process wait/exit notifications, cancellation
       and parent/child relationships. **Partial:** timed polling-based waiting
       and process completion records already exist.
-- [ ] Implement safe user-triggered spawn/exit/wait syscalls. **Partial:**
-      launching currently requires the privileged desktop controller.
+- [ ] Implement a general user process lifecycle and spawn/wait API.
+      **Partial:** Ring 3 now submits allowlisted executable paths to a
+      one-entry launch queue; only the boot thread creates new processes.
+      No arbitrary binary execution, process handles or parent/child waits.
 - [ ] Preserve FPU/SIMD state across context switches.
 - [x] Add **bounded process-owned IPC endpoint handles**, per-PID access checks,
       generation-based stale-handle rejection, and copied message buffers
@@ -66,6 +68,32 @@ preemption, protection or hardware input are correct.
       restoration and every syscall argument/permission boundary.
 
 ## Native graphical applications
+
+- [x] Add five separate native ELF64 apps: Calendar, Mines, Snake,
+      System Monitor and About, with independent process memory and
+      bounded per-PID drawing surfaces. Host builds/tests pass; VM pending.
+- [x] Deliver native directional key and right-click events to the focused
+      PID-owned window; host tests verify per-owner routing.
+- [x] Add read-only RTC-date and free-memory system calls for native apps,
+      with host regression checks.
+- [ ] Complete native feature parity for existing programs; Ring 0 versions
+      remain as fallbacks (the native Clock lacks stopwatch/timer functions).
+- [x] Compile separate Ring 3 source applications for Paint, WordPad,
+      Terminal, File Manager, Run and Settings with bounded graphics and VFS
+      calls; retain the legacy defaults. Host builds/tests pass; VM pending.
+- [x] Prefer native versions of Paint, WordPad, Terminal, File Manager, Run
+      and Settings from Start, with Ring 0 fallbacks on launch failure.
+- [x] Add native Settings IPC theme requests, three Ring 3 desktop palettes,
+      fallback-theme synchronization, RAM preference save/reload (host-tested).
+- [x] Expand native Paint to eight colors with backwards-compatible OXP1
+      import, WordPad cursor editing, native Terminal's basic HOME operations,
+      and File Manager copy/rename/delete (host builds and focused tests).
+- [ ] Reach complete feature parity and remove redundant Ring 0 application
+      controllers: native Paint remains smaller and lacks mouse drag strokes,
+      WordPad lacks rich formatting, and native file browser is still flat.
+      UI functionality is not yet verified in a VM.
+- [ ] Verify all newly migrated programs in QEMU/VirtualBox; archive tests
+      and host unit tests cannot prove interactive guest behavior.
 
 - [x] Compile Calculator, Clock and Notepad as separate freestanding ELF64
       binaries and bundle them in the read-only boot archive.
@@ -91,23 +119,29 @@ preemption, protection or hardware input are correct.
 - [ ] Add standard buttons/widgets, per-application resizing, menus and
       scrollbars. **Partial:** Calculator draws its own buttons and handles
       client mouse events, but no shared widget toolkit exists.
-- [ ] Move the graphical window server, shell and desktop controller to
-      separate Ring 3 processes. **Partial:** `bin/windowd` is now an actual
-      Ring 3 service executable with process-owned IPC channels and a separate
-      `bin/winclient` demonstration. The existing desktop, composition,
-      initial framebuffer drawing and legacy windows **still run in Ring 0**.
-      The versioned window service can control native window geometry, focus
-      and close via peer-verified IPC. **A new Ring 3 taskbar/Start-menu pilot**
-      owns shell layout, menu selection, shortcuts and focus requests. It
-      submits a bounded drawing-command list that the privileged kernel
-      validates and blits. The original desktop remains a watchdog-backed
-      fallback. Legacy application windows, wallpaper and final framebuffer
-      composition remain in Ring 0. The new boot test is unverified in a VM.
+- [ ] Move the entire graphical compositor and legacy application controllers to
+      Ring 3. **Partial:** a persistent `bin/windowd` owns shell policy,
+      wallpaper and desktop-icon layout, Start/taskbar controls, title-bar
+      drag requests, global hotkeys and focus decisions. It submits distinct
+      background and foreground display lists to a bounds-checking kernel
+      rasterizer. The older application windows and their drawing/control
+      code still run in Ring 0; Ring 3 does not yet own final composition of
+      all per-app surfaces. A watchdog restores the older desktop if the
+      server fails. These changes pass host tests but await VM interaction tests.
+- [x] Prefer native Calculator, Notepad, Calendar, Mines and Snake from
+      Start with legacy-window fallback. Clock, System Monitor and About
+      have native ELF pilot binaries but retain richer legacy Start entries.
+      The initial three-slot window limit remains a practical constraint.
+- [x] Reject off-screen Ring 3 window movement, route captured pointer
+      down/move/up events to windowd and avoid repainting identical shell
+      frames on heartbeat updates (host regression tests passed).
 - [x] Add a capability-gated Ring 3 shell command/event ABI with bounded
       drawing lists, keyboard/mouse focus dispatch, service watchdog and
       legacy fallback. Compilation and host tests pass; VM behavior unverified.
-- [ ] Migrate *all* legacy built-ins (Paint, WordPad, Calendar, Mines, Snake,
-      Settings, file manager, Terminal, etc.) without losing features.
+- [ ] Retire legacy Ring 0 built-ins without regressions. **Partial:** Start
+      now prefers their Ring 3 versions and the old windows are fallbacks;
+      their legacy paint/input/render implementations still compile into
+      the kernel and must remain until guest tests confirm replacements.
 - [ ] Add a stable SDK, dynamic libraries/resources and installable apps.
 - [x] Package native applications with a distinct read+execute image and
       zero-initialized read+write segment; host-tested, VM execution unverified.
@@ -133,6 +167,9 @@ preemption, protection or hardware input are correct.
 - [x] **This update:** implement `COPY`, `REN` and `DEL` for temporary
       `HOME` files in the kernel-hosted terminal, with no-overwrite and path
       validation tests. These operations never touch the boot archive/disk.
+- [x] Add native `APP_FS_COPY` for copying immutable boot files to HOME,
+      plus native Terminal COPY/REN/DEL/WRITE/TOUCH and File Manager copy,
+      rename and delete. All write destinations remain RAM-only (host tests).
 - [ ] Add real directory creation, Save As, GUI copy/rename/delete, and
       persistent file operations. **Partial:** RAM file operations exist.
 - [x] Implement a small **two-slot CRC32 disk snapshot serializer** and
@@ -184,13 +221,15 @@ preemption, protection or hardware input are correct.
 1. **Validate multi-process GUI in the VM**: concurrently launch
    `RUN BIN/CALCULATOR`, `RUN BIN/CLOCK` and `RUN BIN/NOTEPAD`, type into
    separate windows, close and relaunch each, check `PS` and QEMU logs.
-2. Validate Ring 3 native Calculator, Clock, Notepad and Canvas drawing,
-   focus, typing and close/relaunch in QEMU and VirtualBox.
+2. Validate the new native Calendar, Mines, Snake, Monitor and About in
+   QEMU and VirtualBox, including key direction and right-click routing,
+   window close/reopen and resource reclamation.
 3. Validate the new atomic GUI_WAIT in QEMU (`make smoke-native-wait`),
    then add process handles, event queue permissions, and user-mode desktop
    and window-server processes. The compositor still lives in Ring 0.
-4. Migrate legacy applications individually and remove Ring 0 UI code only
-   after behavioral parity and isolation tests.
+4. VM-test native Paint, WordPad, Terminal, File Manager, Run and Settings
+   now selected by Start, including failures and Ring 0 fallback. Finish
+   feature parity, then remove legacy rendering/controllers one by one.
 5. Verify the opt-in secondary IDE disk against a disposable VM image, then
    extend the VFS path abstraction with file handles, directory structures,
    disk I/O errors, and crash/power-loss tests.
@@ -208,8 +247,11 @@ it is **not** a claim that the entire operating system is finished.
   prevent clients from controlling unrelated windows through forged PIDs.
 - [x] Transfer taskbar/Start-menu layout and focus/shortcut policy into a
       privileged-service-authenticated Ring 3 process (host-tested source).
-- [ ] Transfer final framebuffer composition, legacy window drawing and all
-      drag policy to Ring 3. The kernel still paints physical pixels.
+- [x] Move desktop background/icon drawing and title-bar drag policy into
+      Ring 3; preserve kernel-only bounds checks and automatic fallback.
+- [ ] Move **all** window composition, legacy application painting and the
+      final desktop renderer out of Ring 0. Kernel framebuffer blitting is
+      still required; no direct hardware framebuffer mapping is given to userspace.
 - [ ] Run `make smoke-window-ipc` in QEMU and verify geometry changes visually
   in VirtualBox. Host test success alone does not prove guest behavior.
 
@@ -233,3 +275,16 @@ it is **not** a claim that the entire operating system is finished.
       independent and retain the kernel desktop after service failure.
 - [ ] Add automatic restart supervision, dedicated service-only process slots,
       reliable input delivery under burst load, and shell-level crash telemetry.
+
+## Native file and launch API pilot
+
+- [x] Expand OXRD boot archive record capacity to 32 with source/host tests.
+- [x] Add named-file list/read/write/delete/rename/kind system call. All
+      user pointers are checked, structs are copied, and operations are bounded
+      to 1 KiB per call; VFS prevents writes to `bin/` and `docs/`.
+- [x] Add allowlisted Ring 3 app-launch request (deferred to boot thread),
+      with queue, permission and overload tests.
+- [ ] Add per-app file permissions, scalable file handles, robust errors,
+      true directories, asynchronous process handles, and persistent storage.
+- [ ] Verify the new syscall execution and native app interaction in QEMU
+      and VirtualBox before claiming working interactive migration.

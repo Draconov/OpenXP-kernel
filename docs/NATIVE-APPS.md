@@ -17,13 +17,30 @@ profile inside the read-only `OXRD` boot archive.
 | `apps/native/windowd.c` | `bin/windowd` | Trusted Ring 3 shell/window-policy service with IPC and bounded drawing commands |
 | `apps/native/winclient.c` | `bin/winclient` | Separate Ring 3 client that connects to the window service |
 | `apps/native/canvas.c` | `bin/canvas` | Demonstrates independent process-owned pixel drawing and click events |
+| `apps/native/calendar.c` | `bin/calendar` | Gregorian date navigation; VM RTC date via read-only syscall |
+| `apps/native/mines.c` | `bin/mines` | First-click-safe Mines with keyboard reset and right-click flags |
+| `apps/native/snake.c` | `bin/snake` | Independent timer-driven game with arrow controls |
+| `apps/native/monitor.c` | `bin/monitor` | Read-only free-page count and uptime |
+| `apps/native/about.c` | `bin/about` | Isolated informational window |
+| `apps/native/paint.c` | `bin/paint` | Eight-color 64×40 canvas, OXP2 save/open and OXP1 import |
+| `apps/native/wordpad.c` | `bin/wordpad` | Bounded text editor, 100%/200% view and RAM document |
+| `apps/native/terminal.c` | `bin/terminal` | Independent terminal with a small set of commands |
+| `apps/native/filemanager.c` | `bin/filemanager` | Boot/HOME file browser, text preview and application launch |
+| `apps/native/run.c` | `bin/run` | Allowlisted application launcher |
+| `apps/native/settings.c` | `bin/settings` | Theme selection through windowd's IPC and RAM-backed preference file |
+
 
 See [Process IPC and window service](IPC.md) for the handle model,
 service authorization, syscall arguments and optional QEMU smoke test.
 
 The earlier `bin/hello` and `bin/fault` are still independent assembly-only
-ELF64 examples. All other familiar desktop tools currently remain embedded
-in the kernel's `kernel/gui/desktop.c` implementation.
+ELF64 examples. Older implementations are retained as compatibility fallbacks.
+Paint, WordPad, Terminal, File Manager, Run and Settings now also have
+independent experimental executables. The older, more complete Ring 0
+versions remain available if native launch fails; the Start menu now prefers
+native counterparts, although VM verification and full parity remain pending. The monitor shows live memory and uptime only, not
+a complete process table. The native Clock remains an uptime display, not
+feature-parity with the older stopwatch/countdown tool.
 
 ## Build and boot
 
@@ -36,7 +53,9 @@ make iso               # Bootable disc image (requires Xorriso/Limine)
 ```
 
 Use **Run** or **Terminal** to launch `BIN/CALCULATOR`, `BIN/CLOCK`,
-`BIN/NOTEPAD`, or `BIN/CANVAS`. They can now be launched concurrently, limited by the
+`BIN/NOTEPAD`, `BIN/CANVAS`, `BIN/CALENDAR`, `BIN/MINES`,
+`BIN/SNAKE`, `BIN/MONITOR`, `BIN/ABOUT`, `BIN/PAINT`, `BIN/WORDPAD`,
+`BIN/TERMINAL`, `BIN/FILEMANAGER`, `BIN/RUN`, or `BIN/SETTINGS`. They can now be launched concurrently, limited by the
 experimental process/scheduler and three-window capacities (host-tested;
 interactive VM verification is outstanding). My Computer also lists the files under BIN. The programs are
 prebuilt into the read-only ISO, not installed on a persistent disk.
@@ -52,11 +71,19 @@ buffers through the process address-space mapping.
 | --- | --- | --- |
 | 6 | `GUI_OPEN(user_title, title_len)` | Open one of three PID-owned windows; 0 on success |
 | 7 | `GUI_TEXT(user_text, text_len)` | Update native text content; 0 on success |
-| 8 | `GUI_EVENT()` | Nonblocking event: ASCII, 8 Backspace, 10 Enter, 27 Escape, `0x10000` close, `0x10001` Ctrl+S, `0x10002` Ctrl+O, or bit 31 mouse click |
+| 8 | `GUI_EVENT()` | Nonblocking event: ASCII, 8 Backspace, 10 Enter, 27 Escape, `0x10000` close, `0x10001` Ctrl+S, `0x10002` Ctrl+O, bit 31 left-click, bit 30 right-click, or `0x10003..0x10006` directional keys |
 | 9 | `RAM_READ(user_buf, max_size)` | Byte count or negative error; fixed temporary note path |
 | 10 | `RAM_WRITE(user_buf, size)` | Byte count or negative error; fixed temporary note path |
 | 11 | `GUI_DRAW(user_commands, count)` | Atomically validate and draw 1–32 fixed-size commands to the calling PID's private surface; 0 or negative error |
 | 12 | `GUI_WAIT(timeout_ticks)` | Atomically dequeue or block until a GUI event; `0` waits indefinitely, positive values set a timer deadline; `0` result means timeout (or unavailable scheduler) |
+| 25 | `RTC_DATE()` | Packed date (year << 16, month << 8, day), or zero if RTC unavailable |
+| 26 | `FREE_PAGES()` | Read-only free 4 KiB physical page count |
+| 27 | `FS_OP(operation, request*)` | Bounded named-file list/read/write/rename/delete/kind; 1,024-byte transfer maximum |
+| 28 | `APP_LAUNCH(path*, length)` | Queue an allowlisted bundled application to launch from the boot thread; 0 means queued, not yet started |
+
+The new game/calendar logic lives in `apps/native/game_logic.h` with host-side
+regression tests (`make test-native-games`). The boot archive now supports 32 records, with 22 entries in the current
+build. Validation still checks record boundaries, CRC32, names and duplicates.
 
 Native app source includes `apps/native/oxp.h`. A tiny `_start` assembly stub
 calls `oxp_main()` with the expected System V AMD64 C stack alignment. The
@@ -100,8 +127,26 @@ provides `oxp_draw`, `oxp_fill`, and `oxp_label` helpers. This is a small
   a fully protected Ring 3 window server or a complete desktop migration.
 - Older native builds used busy-polling loops, so native programs could consume
   CPU even when idle; the scheduler remains experimental.
-- The note filesystem is RAM-only, max 2048 bytes through this user API,
-  and is lost at reboot. No per-user permissions model is claimed.
+- The legacy note API still exists. The new bounded `FS_OP` interface accepts
+  a 48-byte NUL-terminated path and 1,024 data bytes per call. Reads/listing
+  use the VFS; writes/renames/deletes target `home/` only. `APP_FS_COPY` (7)
+  copies files into HOME, including immutable boot files up to RAMFS capacity,
+  but cannot overwrite a destination or modify the boot archive.
+  Files are RAM-only by default and there is no per-user access control model.
+- The launch queue accepts only a hardcoded list of boot-archive applications,
+  excluding the window service, fault probes and arbitrary executable paths.
+  It is a one-slot queue and may be busy. This is NOT a general executable
+  loader, installer or sandboxed process-spawn ABI.
+- Native Paint now uses eight colors but a smaller 64x40 canvas, and still
+  lacks the legacy free-drag painting behavior; its `OXP2` format accepts
+  existing `OXP1` four-color files. Native WordPad supports cursor editing,
+  RAM save/open and whole-document zoom/bold display, not rich formatting.
+  Native Terminal supports HOME file creation, copying, renaming and deletion;
+  File Manager has keyboard-driven copy, rename and delete. Native Settings
+  sends bounded `WM_THEME` requests through IPC to `windowd`, which chooses
+  wallpaper/taskbar colors and synchronizes fallback appearance. Preferences
+  are RAM-only and all native operations still need VM tests.
+  **Full native functional parity has not been reached.**
 - The loader accepts restricted static ELF64, not Microsoft PE `.exe`.
 - No guarantees of robustness, sandbox security or VirtualBox behavior until
   the integration tests have passed on the actual ISO.

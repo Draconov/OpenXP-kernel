@@ -1,5 +1,6 @@
 #include "oxp.h"
 #include "wm_protocol.h"
+#include "theme.h"
 #include "../../kernel/user/wm_display.h"
 #include "../../kernel/user/shell_abi.h"
 #include "../../kernel/input/input.h"
@@ -10,6 +11,7 @@
 #define WM_SERVICE_CHANNELS WM_MAX_WINDOWS
 static wm_state_t state;
 static uint64_t channels[WM_SERVICE_CHANNELS];
+static uint32_t shell_theme;
 
 static int apply_window(uint64_t channel,const wm_packet_t *request,
                         const wm_packet_t *reply){
@@ -59,7 +61,16 @@ static int service_one(unsigned slot){
     if(count==-11)return 0;
     if(count<=0){drop_channel(slot);return 1;}
     wm_packet_t reply={0};
-    if(count==(int64_t)sizeof(request)) {
+    if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
+       request.version==WM_VERSION && request.operation==WM_THEME){
+        reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
+            .operation=WM_THEME|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
+        if(oxp_theme_valid(request.x) &&
+           (int64_t)oxp_call(23,OXP_SHELL_THEME,request.x)==0){
+            shell_theme=request.x;
+            reply.status=WM_OK;
+        }
+    }else if(count==(int64_t)sizeof(request)) {
         wm_packet_t before={.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_QUERY,.window_id=request.window_id};
         wm_packet_t prior={0};
@@ -100,6 +111,9 @@ static oxp_shell_draw_t shell_frame[OXP_SHELL_DRAW_MAX];
 static unsigned drawn;
 static int menu_visible;
 static uint32_t menu_cursor;
+static int32_t drag_index=-1;
+static int32_t drag_anchor_x,drag_anchor_y,drag_start_x,drag_start_y;
+
 static oxp_shell_window_t shell_windows[17];
 static const char *menu_name(unsigned i){
     switch(i){
@@ -119,6 +133,18 @@ static const char *menu_name(unsigned i){
     case 13:return "CALENDAR";
     default:return "";
     }
+}
+static void add_background_rect(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
+    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    shell_frame[drawn++]=(oxp_shell_draw_t){.op=OXP_SHELL_BG_RECT,
+        .x=x,.y=y,.w=w,.h=h,.color=color};
+}
+static void add_background_text(unsigned x,unsigned y,const char *s,unsigned scale,uint32_t color){
+    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    oxp_shell_draw_t *cmd=&shell_frame[drawn++];
+    *cmd=(oxp_shell_draw_t){.op=OXP_SHELL_BG_TEXT,.x=x,.y=y,.w=scale,.color=color};
+    unsigned i=0;while(s[i]&&i<OXP_SHELL_TEXT_MAX-1){cmd->text[i]=s[i];++i;}
+    cmd->text[i]=0;
 }
 static void add_rect(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
     if(drawn>=OXP_SHELL_DRAW_MAX)return;
@@ -145,9 +171,24 @@ static void decimal(char *buffer,uint64_t value){
 }
 static int paint_shell(void){
     refresh_windows();drawn=0;
-    add_rect(0,SHELL_TASK_TOP,SHELL_W,42,0x225cab);
+    /* Desktop wallpaper and icon placement are composed in Ring 3. The
+       privileged layer only rasterizes validated commands behind windows. */
+    add_background_rect(0,0,SHELL_W,SHELL_TASK_TOP,oxp_theme_wallpaper(shell_theme));
+    for(unsigned i=0;i<8u;++i){
+        unsigned yy=i*(SHELL_TASK_TOP/8u);
+        add_background_rect(0,yy,SHELL_W,SHELL_TASK_TOP/8u+1u,
+            /* One stable palette per theme, with faint horizontal bands. */
+            oxp_theme_wallpaper(shell_theme) + i*0x00020100u);
+    }
+    add_background_rect(14,26,94,65,0x286db7);
+    add_background_text(24,48,"MY COMPUTER",1,0xffffff);
+    add_background_rect(14,116,94,65,0x286db7);
+    add_background_text(30,138,"DOCUMENTS",1,0xffffff);
+    add_background_rect(14,206,94,65,0x286db7);
+    add_background_text(30,228,"TERMINAL",1,0xffffff);
+    add_rect(0,SHELL_TASK_TOP,SHELL_W,42,oxp_theme_taskbar(shell_theme));
     add_rect(0,SHELL_TASK_TOP,1024,3,0x78ace6);
-    add_rect(2,SHELL_TASK_TOP+4,105,35,0x26a749);
+    add_rect(2,SHELL_TASK_TOP+4,105,35,oxp_theme_start(shell_theme));
     add_text(19,SHELL_TASK_TOP+16,"START",2,0xffffff);
     unsigned count=0,slot=0;
     for(unsigned i=0;i<17u;++i)if(shell_windows[i].visible)++count;
@@ -183,7 +224,16 @@ static void shell_menu(int on){
     (void)oxp_call(23,OXP_SHELL_MENU,(uint64_t)menu_visible);
 }
 static void activate(unsigned index){
-    if(index<14u)(void)oxp_call(23,OXP_SHELL_OPEN,index);
+    if(index<14u){
+        /* Prefer an isolated ELF process for programs already ported;
+           retain the full legacy implementation if process creation fails. */
+        int native=(index==0u || index==1u || index==3u ||
+                    index==4u || index==5u || index==7u ||
+                    index==8u || index==10u || index==11u ||
+                    index==12u || index==13u);
+        if(!native || (int64_t)oxp_call(23,OXP_SHELL_LAUNCH_NATIVE,index)!=0)
+            (void)oxp_call(23,OXP_SHELL_OPEN,index);
+    }
     shell_menu(0);
 }
 static void taskbar_click(unsigned x){
@@ -251,11 +301,47 @@ static void handle_key(const oxp_shell_event_t *e){
         if(e->code==KEY_ENTER)activate(menu_cursor);
     }
 }
+static void handle_pointer(const oxp_shell_event_t *e){
+    int32_t x=(int32_t)e->x,y=(int32_t)e->y;
+    if(e->flags==OXP_SHELL_POINTER_UP){drag_index=-1;return;}
+    if(e->flags==OXP_SHELL_POINTER_DOWN){
+        refresh_windows();drag_index=-1;
+        uint32_t best_z=0;
+        for(unsigned i=0;i<17u;++i){
+            const oxp_shell_window_t *w=&shell_windows[i];
+            if(!w->visible || w->minimized || w->width<60u)continue;
+            if(x<(int32_t)w->x || x>=(int32_t)(w->x+w->width-58u) ||
+               y<(int32_t)w->y || y>=(int32_t)(w->y+33u))continue;
+            if(drag_index<0 || w->z>=best_z){drag_index=(int32_t)i;best_z=w->z;}
+        }
+        if(drag_index>=0){
+            const oxp_shell_window_t *w=&shell_windows[drag_index];
+            drag_anchor_x=x;drag_anchor_y=y;
+            drag_start_x=(int32_t)w->x;drag_start_y=(int32_t)w->y;
+            (void)oxp_call(23,OXP_SHELL_FOCUS,(uint64_t)drag_index);
+        }
+        return;
+    }
+    if(drag_index<0 || e->flags!=OXP_SHELL_POINTER_MOVE)return;
+    const oxp_shell_window_t *w=&shell_windows[drag_index];
+    int32_t nx=drag_start_x+x-drag_anchor_x;
+    int32_t ny=drag_start_y+y-drag_anchor_y;
+    if(nx<0)nx=0;if(ny<0)ny=0;
+    if((uint32_t)nx+w->width>SHELL_W)nx=(int32_t)(SHELL_W-w->width);
+    if((uint32_t)ny+w->height>SHELL_TASK_TOP)ny=(int32_t)(SHELL_TASK_TOP-w->height);
+    uint64_t coords=((uint64_t)(uint32_t)ny<<32)|(uint32_t)nx;
+    (void)oxp_call3(23,OXP_SHELL_MOVE,(uint64_t)drag_index,coords);
+}
 static void handle_click(const oxp_shell_event_t *e){
     unsigned x=e->x,y=e->y;
     if(y>=SHELL_TASK_TOP){
         if(x<110u){shell_menu(!menu_visible);return;}
         taskbar_click(x);shell_menu(0);return;
+    }
+    if(!menu_visible && x<110u && y<275u){
+        if(y>=25u && y<92u){activate(1);return;}
+        if(y>=115u && y<182u){activate(1);return;}
+        if(y>=205u && y<272u){activate(0);return;}
     }
     if(menu_visible && y>=SHELL_TASK_TOP-370u){
         if(x>=12u&&x<502u){
@@ -276,6 +362,14 @@ void oxp_main(void){
     if(oxp_listen()!=0)oxp_exit(1);
     /* windowd has no application window: it leaves all native slots for
      * clients and owns the shell through its service capability instead. */
+    /* Restore RAM-saved theme after windowd restarts (not persistent disk). */
+    app_file_request_t preference={0};
+    oxp_copy(preference.path,"home/appearance.cfg",sizeof preference.path);
+    if(oxp_file(APP_FS_READ,&preference)==0 && preference.size==1 &&
+       oxp_theme_valid(preference.data[0])){
+        shell_theme=preference.data[0];
+        (void)oxp_call(23,OXP_SHELL_THEME,shell_theme);
+    }
     refresh_windows();
     if(paint_shell())oxp_exit(2);
     uint64_t refresh=oxp_ticks();
@@ -287,6 +381,7 @@ void oxp_main(void){
         while((int64_t)oxp_call(21,(uint64_t)&event,sizeof(event))==1){
             if(event.type==OXP_SHELL_EVENT_KEY)handle_key(&event);
             if(event.type==OXP_SHELL_EVENT_CLICK)handle_click(&event);
+            if(event.type==OXP_SHELL_EVENT_POINTER)handle_pointer(&event);
             if(event.type==OXP_SHELL_EVENT_FOCUS)
                 (void)oxp_call(23,OXP_SHELL_FOCUS,event.code);
             ++work;

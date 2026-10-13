@@ -17,6 +17,7 @@
 #include "arch/x86_64/rtc.h"
 #include "user/userspace.h"
 #include "fs/initrd.h"
+#include "user/app_launch.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
 #include "fs/persist.h"
@@ -268,6 +269,9 @@ static void desktop_interactive_loop(void) {
             serial_puts("OPENXP_RING3_SHELL_READY\n");
             shell_announced=true;
         }
+        char requested_app[48];
+        if(app_launch_take(requested_app,sizeof(requested_app)))
+            (void)shell_launch(NULL,requested_app);
         bool redraw=native_changed || shell_bridge_take_dirty();
         input_event_t event;
         /* Consume whole PS/2 packets rather than stopping after the first byte.

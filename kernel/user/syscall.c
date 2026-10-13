@@ -4,10 +4,15 @@
 #include "user/capipc.h"
 #include "user/wm_display.h"
 #include "arch/x86_64/timer.h"
+#include "arch/x86_64/rtc.h"
+#include "mm/pmm.h"
 #include "serial.h"
 #include "gui/native.h"
 #include "gui/shell_bridge.h"
 #include "fs/vfs.h"
+#include "user/app_file.h"
+#include "user/app_launch.h"
+#include "arch/x86_64/irq_state.h"
 #include <stddef.h>
 
 /* One intentionally bounded buffer syscall. User addresses are never directly
@@ -16,6 +21,14 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
     if ((frame->cs & 3u) != 3u || !userspace_active())
         return (struct syscall_result){0, (uint64_t)-OPENXP_EPERM};
     switch (frame->rax) {
+    case OPENXP_SYS_RTC_DATE: {
+        rtc_date_t today={0};
+        if (!rtc_read_date(&today) || today.year>65535u || today.month>255u || today.day>255u)
+            return (struct syscall_result){0,0};
+        return (struct syscall_result){0,((uint64_t)today.year<<16)|((uint64_t)today.month<<8)|today.day};
+    }
+    case OPENXP_SYS_FREE_PAGES:
+        return (struct syscall_result){0,pmm_free_pages()};
     case OPENXP_SYS_VERSION:
         return (struct syscall_result){0, OPENXP_API_VERSION};
     case OPENXP_SYS_PUTC:
@@ -99,6 +112,73 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
             return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
         return (struct syscall_result){0,vfs_write("home/native-note.txt",bytes,(size_t)frame->rsi)?frame->rsi:(uint64_t)-OPENXP_EPERM};
     }
+    case OPENXP_SYS_APP_LAUNCH: {
+        const address_space_t *space=userspace_current_space();
+        if(!space || frame->rsi<5 || frame->rsi>=APP_FILE_PATH ||
+           !aspace_range_valid(space,frame->rdi,(size_t)frame->rsi,false))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        char path[APP_FILE_PATH]={0};
+        if(!aspace_copy_from_user(space,path,frame->rdi,(size_t)frame->rsi))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        for(size_t i=0;i<(size_t)frame->rsi;++i)
+            if(!path[i])return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(!app_launch_allowed(path))return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        return (struct syscall_result){0,app_launch_submit(path)?0:(uint64_t)-OPENXP_EAGAIN};
+    }
+    case OPENXP_SYS_FS_OP: {
+        const address_space_t *space=userspace_current_space();
+        if(!space || frame->rdi<APP_FS_LIST || frame->rdi>APP_FS_COPY)
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(!aspace_range_valid(space,frame->rsi,sizeof(app_file_request_t),true))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        app_file_request_t req;
+        if(!aspace_copy_from_user(space,&req,frame->rsi,sizeof(req)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        bool path_ok=false,dest_ok=false;
+        for(size_t i=0;i<APP_FILE_PATH;++i){
+            if(req.path[i]==0)path_ok=true;
+            if(req.dest[i]==0)dest_ok=true;
+        }
+        if(!path_ok||!dest_ok||req.size>APP_FILE_DATA)
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        uint64_t result=0;
+        uint64_t saved=irq_save_disable();
+        switch(frame->rdi){
+        case APP_FS_LIST:
+            result=vfs_name_at(req.index,req.path,sizeof req.path)?0:(uint64_t)-OPENXP_EINVAL;
+            if(!result)req.size=0;
+            break;
+        case APP_FS_READ: {
+            size_t n=0;
+            bool ok=vfs_read(req.path,req.data,APP_FILE_DATA,&n);
+            req.size=ok?(uint32_t)n:0;
+            result=ok?0:(uint64_t)-OPENXP_EINVAL;
+            break;
+        }
+        case APP_FS_WRITE:
+            result=vfs_write(req.path,req.data,req.size)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_DELETE:
+            result=vfs_remove(req.path)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_RENAME:
+            result=vfs_rename(req.path,req.dest)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_COPY:
+            result=vfs_copy(req.path,req.dest)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_KIND:
+            result=(uint64_t)vfs_kind(req.path);
+            break;
+        default:result=(uint64_t)-OPENXP_EINVAL;break;
+        }
+        irq_restore(saved);
+        if(frame->rdi==APP_FS_LIST || frame->rdi==APP_FS_READ){
+            if(!result && !aspace_copy_to_user((address_space_t *)space,frame->rsi,&req,sizeof(req)))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        }
+        return (struct syscall_result){0,result};
+    }
     case OPENXP_SYS_IPC_LISTEN:
     case OPENXP_SYS_IPC_ACCEPT:
     case OPENXP_SYS_IPC_CONNECT:
@@ -173,7 +253,7 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         if(!space)return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
         if(frame->rax==OPENXP_SYS_SHELL_ACTION)
             return (struct syscall_result){0,shell_bridge_action((uint32_t)frame->rdi,
-                    (uint32_t)frame->rsi)?0u:(uint64_t)-OPENXP_EINVAL};
+                    (uint32_t)frame->rsi,frame->rdx)?0u:(uint64_t)-OPENXP_EINVAL};
         if(frame->rax==OPENXP_SYS_SHELL_EVENT){
             oxp_shell_event_t event={0};
             if(frame->rsi!=sizeof(event) ||

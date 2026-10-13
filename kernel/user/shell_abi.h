@@ -7,6 +7,8 @@
 #define OXP_SHELL_TEXT_MAX 24u
 #define OXP_SHELL_RECT 1u
 #define OXP_SHELL_TEXT 2u
+#define OXP_SHELL_BG_RECT 3u
+#define OXP_SHELL_BG_TEXT 4u
 #define OXP_SHELL_OPEN 1u
 #define OXP_SHELL_TASK 2u
 #define OXP_SHELL_FOCUS 3u
@@ -14,10 +16,17 @@
 #define OXP_SHELL_MENU 5u
 #define OXP_SHELL_CLOSE 6u
 #define OXP_SHELL_DESKTOP 7u
+#define OXP_SHELL_MOVE 8u
+#define OXP_SHELL_LAUNCH_NATIVE 9u
+#define OXP_SHELL_THEME 10u
 #define OXP_SHELL_EVENT_KEY 1u
 #define OXP_SHELL_EVENT_CLICK 2u
 #define OXP_SHELL_EVENT_FOCUS 3u
 #define OXP_SHELL_EVENT_CLOSE 4u
+#define OXP_SHELL_EVENT_POINTER 5u
+#define OXP_SHELL_POINTER_DOWN 1u
+#define OXP_SHELL_POINTER_MOVE 2u
+#define OXP_SHELL_POINTER_UP 3u
 /* Fixed-width ABI across kernel, app and host tests. */
 typedef struct {
     uint32_t op, x, y, w, h, color;
@@ -30,7 +39,8 @@ typedef struct {
 _Static_assert(sizeof(oxp_shell_event_t)==28,"shell event wire ABI");
 typedef struct {
     uint32_t index,visible,active,minimized;
+    uint32_t x,y,width,height,z;
     char title[32];
 } oxp_shell_window_t;
-_Static_assert(sizeof(oxp_shell_window_t)==48,"window query wire ABI");
+_Static_assert(sizeof(oxp_shell_window_t)==68,"window query wire ABI");
 #endif

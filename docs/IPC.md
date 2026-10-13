@@ -139,3 +139,17 @@ protocol assumes a 1024×768 display. The Ring 3 service now owns taskbar/Start
 rendering commands and mouse/keyboard focus requests, but dragging remains
 kernel-hosted and only one native window exists per client. There is no general
 Ring 3 compositor or automatic service restart. The old desktop is the fallback.
+
+## Appearance requests
+
+`WM_THEME` (operation 7) is a bounded request sent by native Settings to the
+trusted `windowd` service. The `x` field contains a preset ID (0–2). The
+service validates the packet magic/version and preset, then issues the
+privileged `OXP_SHELL_THEME` action through the existing service-gated syscall.
+The kernel updates the fallback desktop's appearance as well. Other Ring 3
+applications cannot issue `OXP_SHELL_THEME` directly.
+
+The request does not delegate framebuffer access. At present any application
+that is permitted to connect to `windowd` can request an appearance change;
+there is no multiuser preference ownership model yet. `home/appearance.cfg`
+is stored in RAMFS; this is not persistent across reboots by default.

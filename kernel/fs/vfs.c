@@ -5,8 +5,9 @@
 /* Keep the writable namespace unambiguous and prevent callers from forging
  * implicit parent paths. RAMFS itself validates each complete filename. */
 static bool home_path(const char *p) {
-    if (!p || p[0]!='h'||p[1]!='o'||p[2]!='m'||p[3]!='e'||p[4]!='/')
-        return false;
+    if(!p)return false;
+    const char prefix[]="home/";
+    for(size_t i=0;i<5u;++i)if(p[i]!=prefix[i])return false;
     return p[5]!=0;
 }
 size_t vfs_count(void) { return initrd_count()+ramfs_count(); }
@@ -43,7 +44,14 @@ bool vfs_write(const char *path,const void *src,size_t length) {
     return home_path(path)&&ramfs_write(path,src,length);
 }
 bool vfs_copy(const char *from,const char *to) {
-    return home_path(from)&&home_path(to)&&ramfs_copy(from,to);
+    if(!from || !home_path(to))return false;
+    if(home_path(from))return ramfs_copy(from,to);
+    /* Copy immutable boot data directly into bounded RAMFS. Destination must
+       not exist; this never enables writing back to the boot image. */
+    const void *source=0;size_t size=0;
+    if(!initrd_lookup(from,&source,&size) || size>RAMFS_FILE_CAPACITY ||
+       vfs_kind(to)!=VFS_MISSING)return false;
+    return ramfs_write(to,source,size);
 }
 bool vfs_rename(const char *from,const char *to) {
     return home_path(from)&&home_path(to)&&ramfs_rename(from,to);

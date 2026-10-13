@@ -80,6 +80,8 @@ bool desktop_shell_close(desktop_t *d);
 void desktop_shell_desktop(desktop_t *d);
 bool desktop_shell_task(desktop_t *d,uint32_t index);
 bool desktop_shell_focus(desktop_t *d,uint32_t index);
+bool desktop_shell_move(desktop_t *d,uint32_t index,uint32_t x,uint32_t y);
+bool desktop_shell_launch_native(desktop_t *d,uint32_t index);
 const char *desktop_shell_title(desktop_t *d,uint32_t index);
 void desktop_native_show(desktop_t *d,unsigned slot,bool showing);
 /* Reconcile trusted kernel window metadata with the existing compositor.

@@ -24,6 +24,11 @@ typedef struct {
 #define NATIVE_EVENT_SAVE 0x10001u
 #define NATIVE_EVENT_OPEN 0x10002u
 #define NATIVE_EVENT_CLICK 0x80000000u
+#define NATIVE_EVENT_RIGHT_CLICK 0x40000000u
+#define NATIVE_EVENT_UP 0x10003u
+#define NATIVE_EVENT_DOWN 0x10004u
+#define NATIVE_EVENT_LEFT 0x10005u
+#define NATIVE_EVENT_RIGHT 0x10006u
 /* Clicks pack x in bits 10..19 and y in bits 0..9; coordinates are
  * window-relative, including the title bar. 10-bit fields are bounded. */
 typedef struct {

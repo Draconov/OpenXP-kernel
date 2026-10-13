@@ -14,7 +14,7 @@
 #define WM_DESKTOP_HEIGHT 728u
 
 enum wm_operation { WM_CREATE=1, WM_MOVE=2, WM_FOCUS=3, WM_QUERY=4,
-                    WM_CLOSE=5, WM_PING=6 };
+                    WM_CLOSE=5, WM_PING=6, WM_THEME=7 };
 enum wm_result { WM_OK=0, WM_BAD_REQUEST=1, WM_UNAUTHORIZED=2,
                  WM_NOT_FOUND=3, WM_NO_SLOTS=4, WM_BAD_GEOMETRY=5 };
 typedef struct {

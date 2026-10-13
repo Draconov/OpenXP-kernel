@@ -44,8 +44,8 @@ def elf_from_native_flat(code: bytes) -> bytes:
 
 
 def pack_archive(entries: list[tuple[str, bytes]]) -> bytes:
-    if not 1 <= len(entries) <= 16:
-        raise ValueError("archive needs 1..16 files")
+    if not 1 <= len(entries) <= 32:
+        raise ValueError("archive needs 1..32 files")
     table = bytearray()
     payload = bytearray()
     for name, content in sorted(entries):

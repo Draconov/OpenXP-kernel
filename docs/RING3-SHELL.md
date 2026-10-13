@@ -1,6 +1,6 @@
 # Ring 3 desktop shell and compositor policy
 
-`bin/windowd` now owns taskbar/Start-menu *layout*, selection and global hotkey policy.
+`bin/windowd` owns desktop wallpaper/icon composition, taskbar/Start-menu layout, global hotkeys, focus and title-bar drag policy.
 It runs as a preemptible Ring 3 process and is automatically started on the
 normal graphical boot. The desktop retains a kernel-hosted fallback.
 
@@ -16,7 +16,16 @@ physical framebuffer mappings from Ring 3 access.
 - `SHELL_FRAME` (22): atomically submit up to 96 bounded rectangle/text commands
 - `SHELL_ACTION` (23): request focus, launch a legacy app, taskbar activation,
   menu policy state, or stop
-- `SHELL_WINDOW` (24): query a bounded window metadata record
+- `SHELL_WINDOW` (24): query bounded window metadata including position and z-order
+- `SHELL_ACTION` also accepts `MOVE` with packed x/y coordinates and
+  `LAUNCH_NATIVE` for a fixed allowlist (bounds and launch paths enforced in Ring 0)
+
+The rendering commands use background (`BG_RECT`, `BG_TEXT`) and foreground
+(`RECT`, `TEXT`) layers. Ring 3 lays out and commits both at once; the
+kernel rasterizer composites background, then application contents, then
+the taskbar/menu. When `windowd` stops or times out, the original kernel
+wallpaper, icons, Start menu, and taskbar are restored. Window dragging is
+chosen in userspace and executed using a bounds-checked MOVE request.
 
 When the service exits or fails to refresh for three seconds, its kernel-owned
 overlay and queue are discarded and normal legacy drawing resumes. A smoke
@@ -28,8 +37,9 @@ can keep testing the original protocol.
 
 This transfers **desktop interaction and composition policy**, not GPU ownership
 or all desktop drawing. The privileged kernel still handles framebuffer I/O,
-legacy app windows, mouse dragging and ordinary window drawing, and retains the
-initial wallpaper. Built-in apps remain Ring 0. The service queries legacy
+legacy application windows and ordinary window content rendering. The Ring 3
+shell now supplies wallpaper and icon drawing commands; it is not a fully
+userspace compositor because kernel-owned legacy windows remain. Built-in apps remain Ring 0. The service queries legacy
 window metadata via narrow syscalls; it cannot access arbitrary kernel memory.
 Window-manager input and composition policy must receive actual QEMU and
 VirtualBox verification before this becomes the default release path.
@@ -37,3 +47,14 @@ VirtualBox verification before this becomes the default release path.
 The fixed 1024×768 coordinates currently match the Limine framebuffer request.
 Resolution negotiation, surface damage tracking, keyboard repeat, compositor
 recovery tests, and migrating legacy apps remain future milestones.
+
+## Application migration boundary
+
+Calculator and Notepad are launched as native Ring 3 ELF applications from the
+new Start menu when a process slot is available; a failed launch returns to the
+legacy window. The native variants have smaller toolkits and are not yet
+feature-identical to the original kernel applications. WordPad, Paint, Mines,
+Snake, Calendar, settings, Terminal, and File Manager still run inside the
+kernel. Migrating these faithfully requires per-app ports, more than three
+native GUI windows, an event-driven GUI toolkit, and VM testing. Track these
+items in [Roadmap](ROADMAP.md) rather than treating the shell migration as complete.

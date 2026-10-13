@@ -50,10 +50,19 @@ make smoke-shell      # Confirm the Ring 3 desktop/taskbar policy service starts
 
 The trusted `bin/windowd` Ring 3 process now starts automatically on normal
 boot, owns Start-menu/taskbar drawing commands, global keyboard shortcuts,
-focus policy and IPC window requests. The kernel performs validated framebuffer
-composition and retains the legacy desktop as an automatic fallback if the
-service exits or stops refreshing its frame. **Legacy apps, desktop icons and
-window drawing still run in Ring 0.** See [Ring 3 Shell](docs/RING3-SHELL.md),
+focus and title-bar drag policy, desktop icon layout, and IPC window requests.
+Ring 3 submits separate background and foreground drawing layers; the kernel
+validates commands and paints pixels. The legacy desktop is restored if the
+service exits or stops refreshing its frame. **Final window rasterization and several older application UIs still execute
+in Ring 0.** Calculator, Notepad, Calendar, Mines and Snake now prefer separately compiled
+Ring 3 ELF programs from Start, falling back to legacy windows when a native
+process cannot launch. Clock, System Monitor and About have experimental native
+binaries that can be tried through `RUN BIN/NAME` without replacing their
+more complete legacy Start-menu implementations. Paint, WordPad, Terminal, File Manager, Run and Settings now have separate
+Ring 3 ELF executables and Start attempts to launch these first. If a native
+process cannot launch, the previous Ring 0 implementation remains as fallback.
+These replacements are not yet feature-equivalent, and the native launcher,
+settings IPC, and input behavior still require VirtualBox verification. See [Ring 3 Shell](docs/RING3-SHELL.md),
 [IPC](docs/IPC.md) and the [Roadmap](docs/ROADMAP.md). The new mode needs real
 QEMU/VirtualBox testing before it should be considered reliable.
 
@@ -139,6 +148,18 @@ pixel surfaces instead of sharing the framebuffer or living inside the
 kernel. The original legacy app windows remain for compatibility.
 Actual concurrent Ring 3 GUI behavior must still be verified in a VM.
 See [Native applications](docs/NATIVE-APPS.md) for the developer ABI.
+
+**New Ring 3 application pilots:** From the existing Terminal use
+`RUN BIN/PAINT`, `RUN BIN/WORDPAD`, `RUN BIN/TERMINAL`,
+`RUN BIN/FILEMANAGER`, `RUN BIN/RUN`, or `RUN BIN/SETTINGS`.
+The OXRD boot archive now supports 32 entries. The new file API supports
+bounded HOME file operations and a restricted program launch queue; there
+is still no general installed-application system or persistent filesystem.
+The latest source adds live theme requests from native Settings to windowd,
+boot-file copying into HOME, expanded native file commands, 8-color native Paint,
+and cursor-based WordPad editing. HOME is RAM-backed, so changes vanish at
+shutdown. These source changes have host tests, not verified guest behavior.
+The new native apps are still not fully feature-equivalent to the legacy ones.
 
 **Window-service experiment:** `windowd` starts automatically at normal boot.
 Use `RUN BIN/WINCLIENT` to exercise IPC-managed native window creation,

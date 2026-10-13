@@ -1,4 +1,7 @@
 #include "user/syscall.h"
+#include "user/app_file.h"
+#include "user/app_launch.h"
+#include "arch/x86_64/rtc.h"
 #include "user/wm_display.h"
 #include "user/capipc.h"
 #include "gui/native.h"
@@ -14,25 +17,32 @@ static char emitted;
 static address_space_t mock_space = { .cr3 = 4096 };
 static char output[128];
 static char mock_user_memory[64] = "Hello from user memory";
+static app_file_request_t mock_file;
 static size_t output_len;
 const address_space_t *userspace_current_space(void) { return active ? &mock_space : NULL; }
 bool aspace_range_valid(const address_space_t *s, uint64_t ptr, size_t len, bool writable) {
-    return s == &mock_space && !writable && ptr >= 1000 && len <= 64 && ptr-1000 <= 64-len;
+    if(s != &mock_space)return false;
+    if(ptr>=2000 && ptr-2000<=sizeof(mock_file))return len<=sizeof(mock_file)-(size_t)(ptr-2000);
+    return !writable && ptr>=1000 && ptr-1000<=64 && len<=64-(size_t)(ptr-1000);
 }
 bool aspace_copy_from_user(const address_space_t *s, void *dst, uint64_t ptr, size_t len) {
     if (!aspace_range_valid(s,ptr,len,false)) return false;
-    memcpy(dst,mock_user_memory+(ptr-1000),len);
+    if(ptr>=2000)memcpy(dst,(const char *)&mock_file+(ptr-2000),len);
+    else memcpy(dst,mock_user_memory+(ptr-1000),len);
     return true;
 }
 
 bool aspace_copy_to_user(address_space_t *s,uint64_t dst,const void *src,size_t len) {
-    (void)s;(void)dst;(void)src;(void)len;return false;
+    if(!aspace_range_valid(s,dst,len,true))return false;
+    memcpy((char *)&mock_file+(dst-2000),src,len);return true;
 }
 uint64_t process_current_pid(void) { return active ? 17 : 0; }
 bool userspace_active(void) { return active; }
 void userspace_finish(uint64_t status) { exit_status = status; active = false; }
 void serial_putc(char ch) { emitted = ch; if (output_len < sizeof(output)) output[output_len++] = ch; }
 uint64_t timer_ticks(void) { return 1234; }
+uint64_t pmm_free_pages(void) { return 437; }
+bool rtc_read_date(rtc_date_t *out) { if(!out)return false;*out=(rtc_date_t){2026,10,13};return true; }
 int main(void) {
     struct exception_frame f = {0};
     struct syscall_result r;
@@ -47,6 +57,12 @@ int main(void) {
     f.cs = 0x23;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == OPENXP_API_VERSION);
+    f.rax=OPENXP_SYS_RTC_DATE;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result == ((2026u<<16)|(10u<<8)|13u));
+    f.rax=OPENXP_SYS_FREE_PAGES;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==437);
     f.rax = OPENXP_SYS_PUTC;
     f.rdi = 'X';
     r = user_syscall_dispatch(&f);
@@ -112,6 +128,43 @@ int main(void) {
     native_push_event('W');
     r=user_syscall_dispatch(&f);
     assert(!r.exit && r.result=='W');
+    /* User-mode path operations copy the entire request and return bounded data. */
+    f.rax=OPENXP_SYS_FS_OP;f.rsi=2000;f.rdi=APP_FS_WRITE;
+    memset(&mock_file,0,sizeof mock_file);
+    strcpy(mock_file.path,"home/syscall.txt");
+    memcpy(mock_file.data,"TEST",4);mock_file.size=4;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rdi=APP_FS_READ;
+    memset(mock_file.data,0,sizeof mock_file.data);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0 && mock_file.size==4 && !memcmp(mock_file.data,"TEST",4));
+    f.rdi=APP_FS_RENAME;strcpy(mock_file.dest,"home/newname.txt");
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rdi=APP_FS_COPY;strcpy(mock_file.path,"home/newname.txt");
+    strcpy(mock_file.dest,"home/cloned.txt");
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rdi=APP_FS_DELETE;strcpy(mock_file.path,"home/cloned.txt");
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rdi=APP_FS_KIND;strcpy(mock_file.path,"home/newname.txt");
+    r=user_syscall_dispatch(&f);assert(r.result==2);
+    f.rdi=APP_FS_DELETE;r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rdi=APP_FS_WRITE;strcpy(mock_file.path,"bin/hello");
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rdi=APP_FS_LIST;mock_file.index=0;
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EINVAL || r.result==0);
+    f.rdi=APP_FS_READ;mock_file.path[0]='h';
+    memset(mock_file.path,'A',sizeof mock_file.path);
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rax=OPENXP_SYS_APP_LAUNCH;
+    memcpy(mock_user_memory,"bin/paint",9);
+    f.rdi=1000;f.rsi=9;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EAGAIN);
+    memcpy(mock_user_memory,"bin/fault",9);
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EPERM);
+    char pending[48];assert(app_launch_take(pending,sizeof pending));
+    assert(!strcmp(pending,"bin/paint"));
     f.rax = 0xffff;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == (uint64_t)-OPENXP_ENOSYS);

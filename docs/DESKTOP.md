@@ -188,3 +188,46 @@ pixel/bitmap-glyph ABI. The Ring 0 desktop currently composes these surfaces
 into the native window slots. These native programs and their mouse/keyboard
 handling still require end-to-end VM verification. The older built-in tools
 remain available and are not yet migrated out of Ring 0.
+
+## Native application migration
+
+Calendar, Mines, Snake, System Monitor and About join the previously bundled
+Calculator, Clock, Notepad and Canvas as independent ELF64 applications.
+Start and shortcuts prefer the native Calendar, Mines and Snake alongside
+Calculator and Notepad; the other standalone demos remain opt-in via Run or
+Terminal until their missing legacy features are ported. A full three-window
+native broker triggers a legacy fallback instead of silently failing.
+
+- `RUN BIN/CALENDAR`: arrows change month/year, click selects a day, T returns
+  to today's RTC date if available.
+- `RUN BIN/MINES`: left click reveals, right click flags, N restarts.
+- `RUN BIN/SNAKE`: arrow keys steer, Space pauses/starts, N restarts.
+- `RUN BIN/MONITOR`: read-only uptime and available physical page count.
+- `RUN BIN/ABOUT`: informational window.
+
+These new windows use a fixed-size 320x180 software-rendered canvas, not
+GPU acceleration. Native graphics and input still require VirtualBox testing.
+
+## Native migration update
+
+The Start menu now attempts Ring 3 versions of Paint, WordPad, Terminal,
+File Manager, Run and Appearance Settings; Ring 0 equivalents are retained as
+fallbacks while guest verification and feature parity are incomplete.
+
+- **Native Settings:** select one of three schemes for a live `windowd`
+  wallpaper/taskbar change. Save writes `home/appearance.cfg` to RAM; values
+  disappear when the VM powers down unless experimental storage is enabled.
+- **Native File Manager:** `C` copies a selected file to HOME (using `.copy`
+  for HOME-to-HOME copies), `R` starts a new-filename prompt on HOME files,
+  `D` deletes a HOME file, and `O` or Enter previews/opens.
+- **Native Terminal:** `LS`, `CAT`, `RUN`, `MEM`, `UPTIME`, `COPY`, `REN`,
+  `DEL`, `WRITE` and `TOUCH`. `COPY docs/readme.txt home/readme.txt` is a
+  useful example. Commands and filenames are intentionally length-limited.
+- **Native Paint:** 64x40 pixels with eight colors and OXP2 save data; the
+  previous OXP1 drawing format is imported. Drawing is still click-based.
+- **Native WordPad:** limited cursor insertion/deletion and whole-document
+  zoom/bold; not a fully featured rich-text editor.
+
+Final pixel rendering and legacy window controllers still run in Ring 0.
+Moving those out requires a separately tested userspace compositor and full
+application parity; the fallback must remain available until then.
