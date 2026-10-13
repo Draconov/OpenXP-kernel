@@ -54,7 +54,13 @@ preemption, protection or hardware input are correct.
 - [ ] Implement safe user-triggered spawn/exit/wait syscalls. **Partial:**
       launching currently requires the privileged desktop controller.
 - [ ] Preserve FPU/SIMD state across context switches.
-- [ ] Add per-process handle tables and safe capability-based IPC.
+- [x] Add **bounded process-owned IPC endpoint handles**, per-PID access checks,
+      generation-based stale-handle rejection, and copied message buffers
+      (host tests and sanitizers).
+- [ ] Extend these into general-purpose per-process handle tables, robust
+      capability delegation, and audited permission/identity policies.
+      **Partial:** the initial transport has one kernel-authorized singleton
+      service, fixed global endpoints, and no delegation or SMP support.
 - [ ] Add priority scheduling, timeouts and deadlock diagnostics.
 - [ ] Audit mapping inheritance, kernel entry stacks, exception context
       restoration and every syscall argument/permission boundary.
@@ -86,7 +92,11 @@ preemption, protection or hardware input are correct.
       scrollbars. **Partial:** Calculator draws its own buttons and handles
       client mouse events, but no shared widget toolkit exists.
 - [ ] Move the graphical window server, shell and desktop controller to
-      separate Ring 3 processes. **Not started:** all still run in Ring 0.
+      separate Ring 3 processes. **Partial:** `bin/windowd` is now an actual
+      Ring 3 service executable with process-owned IPC channels and a separate
+      `bin/winclient` demonstration. The existing desktop, composition,
+      taskbar and window-manager authority **still run in Ring 0**.
+      Live QEMU integration remains unverified.
 - [ ] Migrate *all* legacy built-ins (Paint, WordPad, Calendar, Mines, Snake,
       Settings, file manager, Terminal, etc.) without losing features.
 - [ ] Add a stable SDK, dynamic libraries/resources and installable apps.

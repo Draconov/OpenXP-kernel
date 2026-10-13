@@ -46,6 +46,8 @@ jobs:
         run: make smoke-user-fault
       - name: Verify user mode cannot read supervisor memory
         run: make smoke-user-protection
+      - name: Ring 3 window-service capability IPC smoke test
+        run: make smoke-window-ipc
       - name: Upload build results
         if: always()
         uses: actions/upload-artifact@v4

@@ -12,8 +12,14 @@ profile inside the read-only `OXRD` boot archive.
 | `apps/native/calculator.c` | `bin/calculator` | Integer keyboard calculator |
 | `apps/native/clock.c` | `bin/clock` | PIT uptime display |
 | `apps/native/notepad.c` | `bin/notepad` | Editable note with temporary RAM saving |
-| `apps/native/probe.c` | `bin/probe` | Automated ABI verification only |
+| `apps/native/probe.c` | `bin/probe` | Synchronous GUI and RAM-file ABI smoke probe |
+| `apps/native/waitprobe.c` | `bin/waitprobe` | Preemptible Ring 3 GUI wait and timeout smoke probe |
+| `apps/native/windowd.c` | `bin/windowd` | Prototype authorized Ring 3 window-service process; IPC PING/PONG |
+| `apps/native/winclient.c` | `bin/winclient` | Separate Ring 3 client that connects to the window service |
 | `apps/native/canvas.c` | `bin/canvas` | Demonstrates independent process-owned pixel drawing and click events |
+
+See [Process IPC and window service](IPC.md) for the handle model,
+service authorization, syscall arguments and optional QEMU smoke test.
 
 The earlier `bin/hello` and `bin/fault` are still independent assembly-only
 ELF64 examples. All other familiar desktop tools currently remain embedded
@@ -86,7 +92,7 @@ provides `oxp_draw`, `oxp_fill`, and `oxp_label` helpers. This is a small
   GUI_CLOSE is a sticky signal even when the input FIFO is full. The older
   `GUI_EVENT` nonblocking syscall remains available.
 - The wait path needs real QEMU/VirtualBox verification (`make smoke-native-wait`).
-  The new boot test launches a preemptible Ring 3 probe, which exercises a
+  The separate wait boot test launches a preemptible Ring 3 waitprobe, which exercises a
   timed GUI_WAIT while timer interrupts are enabled. The test does not prove
   a fully protected Ring 3 window server or a complete desktop migration.
 - Older native builds used busy-polling loops, so native programs could consume

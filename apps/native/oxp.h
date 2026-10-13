@@ -21,6 +21,26 @@ static inline uint64_t oxp_call(uint64_t id,uint64_t a,uint64_t b) {
     __asm__ volatile("int $0x80" : "+a"(rax) : "D"(rdi),"S"(rsi) : "memory","cc");
     return rax;
 }
+/* Capability IPC: opaque per-process handles, copied 1..64-byte messages.
+ * Negative return values are errno-like; nonblocking send/receive. */
+#define OXP_IPC_MSG_MAX 64u
+static inline uint64_t oxp_call3(uint64_t id,uint64_t a,uint64_t b,uint64_t c) {
+    register uint64_t rax __asm__("rax")=id;
+    register uint64_t rdi __asm__("rdi")=a;
+    register uint64_t rsi __asm__("rsi")=b;
+    register uint64_t rdx __asm__("rdx")=c;
+    __asm__ volatile("int $0x80" : "+a"(rax) : "D"(rdi),"S"(rsi),"d"(rdx) : "memory","cc");
+    return rax;
+}
+static inline int64_t oxp_listen(void){return (int64_t)oxp_call(13,0,0);}
+static inline int64_t oxp_accept(void){return (int64_t)oxp_call(14,0,0);}
+static inline int64_t oxp_connect(void){return (int64_t)oxp_call(15,0,0);}
+static inline int64_t oxp_send(uint64_t h,const void *p,size_t n){return (int64_t)oxp_call3(16,h,(uint64_t)p,n);}
+static inline int64_t oxp_recv(uint64_t h,void *p,size_t cap){return (int64_t)oxp_call3(17,h,(uint64_t)p,cap);}
+static inline int64_t oxp_close(uint64_t h){return (int64_t)oxp_call(18,h,0);}
+/* 0 means wait for incoming connection; other handles wait for messages.
+ * 0 ticks = indefinite park; positive ticks = relative timer deadline. */
+static inline int64_t oxp_ipc_wait(uint64_t h,uint64_t ticks){return (int64_t)oxp_call(19,h,ticks);}
 static inline size_t oxp_len(const char *s){size_t n=0;while(s[n])++n;return n;}
 static inline int oxp_open(const char *s){return (int)oxp_call(6,(uint64_t)s,oxp_len(s));}
 static inline int oxp_text(const char *s){return (int)oxp_call(7,(uint64_t)s,oxp_len(s));}

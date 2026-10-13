@@ -27,6 +27,7 @@
 #include "gui/native.h"
 #include "input/input.h"
 #include "user/process.h"
+#include "user/capipc.h"
 
 __attribute__((used, section(".limine_requests_start"))) static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
 __attribute__((used, section(".limine_requests"))) static volatile uint64_t base_revision[] = LIMINE_BASE_REVISION(3);
@@ -63,6 +64,11 @@ struct native_job { uint64_t pid; bool occupied; };
 static volatile uint64_t native_wait_test_pid;
 static volatile bool native_wait_test_done, native_wait_test_ok;
 #endif
+#ifdef OPENXP_CAPIPC_SELFTEST
+static volatile uint64_t capipc_server_test_pid, capipc_client_test_pid;
+static volatile bool capipc_server_done, capipc_client_done;
+static volatile bool capipc_server_ok, capipc_client_ok;
+#endif
 static struct native_job native_jobs[NATIVE_MAX_WINDOWS];
 static void native_worker(void *opaque) {
     struct native_job *job=(struct native_job *)opaque;
@@ -79,6 +85,16 @@ static void native_worker(void *opaque) {
         native_wait_test_done=true;
     }
 #endif
+#ifdef OPENXP_CAPIPC_SELFTEST
+    if(job->pid==capipc_server_test_pid){
+        capipc_server_ok=launched && info.state==PROCESS_EXITED && !info.status;
+        capipc_server_done=true;
+    }
+    if(job->pid==capipc_client_test_pid){
+        capipc_client_ok=launched && info.state==PROCESS_EXITED && !info.status;
+        capipc_client_done=true;
+    }
+#endif
     job->occupied=false;
     irq_restore(flags);
 }
@@ -93,11 +109,19 @@ static bool shell_launch(void *ctx,const char *path) {
     if(!job){irq_restore(flags);return false;}
     uint64_t pid=process_create_elf(image,bytes);
     if(!pid){irq_restore(flags);return false;}
+    /* Only the trusted, immutable boot-archive executable can own the
+     * singleton window service; ordinary Ring 3 callers cannot self-grant. */
+    if(path[0]=='b' && path[1]=='i' && path[2]=='n' && path[3]=='/' &&
+       path[4]=='w' && path[5]=='i' && path[6]=='n' && path[7]=='d' &&
+       path[8]=='o' && path[9]=='w' && path[10]=='d' && path[11]==0 &&
+       !capipc_grant_server(pid)) {
+        (void)process_cancel_ready(pid);irq_restore(flags);return false;
+    }
     job->pid=pid;job->occupied=true;
     if(!scheduler_create(native_worker,job)) {
         (void)process_cancel_ready(pid);
         serial_puts("OpenXP: native thread allocation failed\n");
-        job->occupied=false;
+    job->occupied=false;
         irq_restore(flags);return false;
     }
     irq_restore(flags);
@@ -157,7 +181,7 @@ static void desktop_interactive_loop(void) {
     /* Independently verify blocking from an actual preemptible CPL3 worker.
      * The probe waits 3 PIT ticks and exits with a failure status on error. */
     uint64_t test_flags=irq_save_disable();
-    bool started=shell_launch(0,"bin/probe");
+    bool started=shell_launch(0,"bin/waitprobe");
     if(started)native_wait_test_pid=native_jobs[0].pid;
     irq_restore(test_flags);
     if(!started){serial_puts("ERROR: GUI event wait probe launch failed\n");kernel_halt();}
@@ -168,6 +192,34 @@ static void desktop_interactive_loop(void) {
         serial_puts("ERROR: preemptive GUI_WAIT self-test failed\n");kernel_halt();
     }
     serial_puts("OPENXP_NATIVE_WAIT_OK\n");
+#endif
+#ifdef OPENXP_CAPIPC_SELFTEST
+    /* Optional two-process Ring 3 IPC integration check. The normal desktop
+     * does not automatically start these diagnostic applications. */
+    uint64_t ipc_flags=irq_save_disable();
+    bool server_started=shell_launch(0,"bin/windowd");
+    if(server_started)capipc_server_test_pid=native_jobs[0].pid;
+    irq_restore(ipc_flags);
+    if(!server_started){serial_puts("ERROR: windowd failed to launch\n");kernel_halt();}
+    /* Allow the server to publish before the client races its connection. */
+    uint64_t wait_start=timer_ticks();
+    while(timer_ticks()-wait_start<5u)__asm__ volatile("pause" ::: "memory");
+    ipc_flags=irq_save_disable();
+    bool client_started=shell_launch(0,"bin/winclient");
+    if(client_started) {
+        for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+            if(native_jobs[i].occupied && native_jobs[i].pid!=capipc_server_test_pid)
+                capipc_client_test_pid=native_jobs[i].pid;
+    }
+    irq_restore(ipc_flags);
+    if(!client_started){serial_puts("ERROR: window client failed to launch\n");kernel_halt();}
+    wait_start=timer_ticks();
+    while((!capipc_server_done || !capipc_client_done) && timer_ticks()-wait_start<650u)
+        __asm__ volatile("pause" ::: "memory");
+    if(!capipc_server_done || !capipc_client_done || !capipc_server_ok || !capipc_client_ok){
+        serial_puts("ERROR: Ring 3 window service IPC test failed\n");kernel_halt();
+    }
+    serial_puts("OPENXP_CAPIPC_OK\n");
 #endif
     uint64_t last_second=timer_ticks()/100u;
     for (;;) {
@@ -617,11 +669,36 @@ void _start(void) {
         const void *image=0;size_t length=0;
         uint64_t pages_before=pmm_free_pages();
         process_info_t result={0};
-        if(!initrd_lookup("bin/probe",&image,&length))kernel_halt();
-        uint64_t pid=process_create_elf(image,length);
-        if(!pid||!process_run(pid,&result)||result.state!=PROCESS_EXITED||result.status!=0||
-           !process_reap(pid)||pmm_free_pages()!=pages_before) {
-            serial_puts("ERROR: native GUI syscall/RAM file selftest failed\n");kernel_halt();
+        if (!initrd_lookup("bin/probe", &image, &length)) {
+            serial_puts("ERROR: native ABI probe missing from initrd\n");
+            kernel_halt();
+        }
+        uint64_t pid = process_create_elf(image, length);
+        if (!pid) {
+            serial_puts("ERROR: native ABI ELF process creation failed\n");
+            kernel_halt();
+        }
+        bool ran = process_run(pid, &result);
+        if (!ran || result.state != PROCESS_EXITED || result.status != 0) {
+            serial_puts("ERROR: native ABI probe execution failed: ran=");
+            serial_u64(ran);
+            serial_puts(" state="); serial_u64((uint64_t)result.state);
+            serial_puts(" status="); serial_u64(result.status);
+            serial_puts(" fault_vector="); serial_u64(result.fault_vector);
+            serial_puts(" fault_address="); serial_hex64(result.fault_address);
+            serial_puts("\n");
+            kernel_halt();
+        }
+        if (!process_reap(pid)) {
+            serial_puts("ERROR: native ABI probe process reap failed\n");
+            kernel_halt();
+        }
+        if (pmm_free_pages() != pages_before) {
+            serial_puts("ERROR: native ABI probe leaked physical pages: before=");
+            serial_u64(pages_before);
+            serial_puts(" after="); serial_u64(pmm_free_pages());
+            serial_puts("\n");
+            kernel_halt();
         }
         serial_puts("OPENXP_NATIVE_ABI_OK\n");
     }

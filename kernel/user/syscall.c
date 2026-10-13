@@ -1,6 +1,7 @@
 #include "user/syscall.h"
 #include "user/userspace.h"
 #include "user/process.h"
+#include "user/capipc.h"
 #include "arch/x86_64/timer.h"
 #include "serial.h"
 #include "gui/native.h"
@@ -95,6 +96,49 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         if(!aspace_copy_from_user(space,bytes,frame->rdi,(size_t)frame->rsi))
             return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
         return (struct syscall_result){0,vfs_write("home/native-note.txt",bytes,(size_t)frame->rsi)?frame->rsi:(uint64_t)-OPENXP_EPERM};
+    }
+    case OPENXP_SYS_IPC_LISTEN:
+    case OPENXP_SYS_IPC_ACCEPT:
+    case OPENXP_SYS_IPC_CONNECT:
+    case OPENXP_SYS_IPC_CLOSE:
+    case OPENXP_SYS_IPC_WAIT: {
+        uint64_t pid=process_current_pid(), handle=0;
+        capipc_result_t r=CAPIPC_INVALID;
+        if(frame->rax==OPENXP_SYS_IPC_LISTEN)r=capipc_listen(pid);
+        else if(frame->rax==OPENXP_SYS_IPC_ACCEPT)r=capipc_accept(pid,&handle);
+        else if(frame->rax==OPENXP_SYS_IPC_CONNECT)r=capipc_connect(pid,&handle);
+        else if(frame->rax==OPENXP_SYS_IPC_CLOSE)r=capipc_close(pid,frame->rdi);
+        else r=capipc_wait(pid,frame->rdi,frame->rsi);
+        if(r==CAPIPC_OK && (frame->rax==OPENXP_SYS_IPC_ACCEPT || frame->rax==OPENXP_SYS_IPC_CONNECT))
+            return (struct syscall_result){0,handle};
+        if(r==CAPIPC_OK)return (struct syscall_result){0,0};
+        int err=r==CAPIPC_EMPTY || r==CAPIPC_FULL?OPENXP_EAGAIN:
+            r==CAPIPC_CLOSED?OPENXP_EPIPE:r==CAPIPC_NOSPACE?OPENXP_ENOSPC:
+            r==CAPIPC_DENIED?OPENXP_EPERM:OPENXP_EINVAL;
+        return (struct syscall_result){0,(uint64_t)-(uint64_t)err};
+    }
+    case OPENXP_SYS_IPC_SEND:
+    case OPENXP_SYS_IPC_RECV: {
+        uint64_t pid=process_current_pid();
+        const address_space_t *space=userspace_current_space();
+        /* handle in RDI, buffer in RSI, length/capacity in RDX. */
+        if(!space || !frame->rdx || frame->rdx>CAPIPC_MSG_BYTES)
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        bool receive=frame->rax==OPENXP_SYS_IPC_RECV;
+        if(!aspace_range_valid(space,frame->rsi,(size_t)frame->rdx,receive))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        uint8_t data[CAPIPC_MSG_BYTES]={0};size_t n=0;
+        if(!receive && !aspace_copy_from_user(space,data,frame->rsi,(size_t)frame->rdx))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        capipc_result_t r=receive?capipc_receive(pid,frame->rdi,data,(size_t)frame->rdx,&n):
+            capipc_send(pid,frame->rdi,data,(size_t)frame->rdx);
+        if(r==CAPIPC_OK && receive && !aspace_copy_to_user((address_space_t *)space,frame->rsi,data,n))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        if(r==CAPIPC_OK)return (struct syscall_result){0,receive?n:frame->rdx};
+        int err=r==CAPIPC_EMPTY || r==CAPIPC_FULL?OPENXP_EAGAIN:
+            r==CAPIPC_CLOSED?OPENXP_EPIPE:r==CAPIPC_NOSPACE?OPENXP_ENOSPC:
+            r==CAPIPC_DENIED?OPENXP_EPERM:OPENXP_EINVAL;
+        return (struct syscall_result){0,(uint64_t)-(uint64_t)err};
     }
     case OPENXP_SYS_EXIT:
         native_owner_exit(process_current_pid());

@@ -113,6 +113,19 @@ int main(void) {
     f.rax = 0xffff;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == (uint64_t)-OPENXP_ENOSYS);
+    /* A normal user task may not register as the trusted window server. */
+    f.rax = OPENXP_SYS_IPC_LISTEN;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EPERM);
+    f.rax = OPENXP_SYS_IPC_CONNECT;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EPIPE);
+    f.rax = OPENXP_SYS_IPC_SEND; f.rdi=0; f.rsi=999; f.rdx=4;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rsi=1000;f.rdx=65;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==(uint64_t)-OPENXP_EINVAL);
     f.rax = OPENXP_SYS_EXIT;
     f.rdi = 77;
     r = user_syscall_dispatch(&f);

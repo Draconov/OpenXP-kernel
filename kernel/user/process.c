@@ -1,4 +1,5 @@
 #include "user/process.h"
+#include "user/capipc.h"
 #include "user/userspace.h"
 #include "user/elf.h"
 #include "arch/x86_64/gdt.h"
@@ -123,6 +124,7 @@ static bool check_kernel_stack(const struct process *p) {
     return true;
 }
 static void discard(struct process *p) {
+    capipc_process_exit(p->info.pid);
     if (p->space.cr3) (void)aspace_destroy(&p->space);
     drop_kernel_stack(p);
     *p = (struct process){0};
@@ -134,6 +136,7 @@ bool process_init(void) {
         processes[i] = (struct process){0};
     next_pid = 1;
     completion_counter = 0;
+    capipc_init();
     initialized = true;
     return true;
 }
@@ -224,6 +227,7 @@ void process_finish(uint64_t status) {
     if (p) {
         p->info.status = status;
         p->info.state = PROCESS_EXITED;
+        capipc_process_exit(p->info.pid);
         p->info.completion_sequence = ++completion_counter;
         if (!completion_counter) p->info.completion_sequence = ++completion_counter;
     }
@@ -235,6 +239,7 @@ void process_record_fault(uint64_t vector, uint64_t fault_address) {
         p->info.fault_vector = vector;
         p->info.fault_address = fault_address;
         p->info.state = PROCESS_FAULTED;
+        capipc_process_exit(p->info.pid);
         p->info.completion_sequence = ++completion_counter;
         if (!completion_counter) p->info.completion_sequence = ++completion_counter;
     }
@@ -295,6 +300,7 @@ static bool run_process(uint64_t pid, process_info_t *result, bool preemptible) 
     p->kernel_continuation = 0;
     if (p->info.state == PROCESS_RUNNING) {
         p->info.state = PROCESS_FAULTED;
+        capipc_process_exit(p->info.pid);
         p->info.completion_sequence = ++completion_counter;
         if (!completion_counter) p->info.completion_sequence = ++completion_counter;
         p->info.status = UINT64_MAX;

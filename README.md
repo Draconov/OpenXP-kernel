@@ -44,6 +44,7 @@ For headless boot checks:
 make smoke          # Desktop boot markers over serial
 make smoke-deep     # Additional kernel and user-mode diagnostics
 make smoke-native   # Native GUI/RAM ABI probe in Ring 3
+make smoke-window-ipc # Optional two-process IPC test in QEMU
 ```
 
 GitHub Actions runs the build and tests and uploads available kernel/ISO build
@@ -222,10 +223,19 @@ status see [Native applications](docs/NATIVE-APPS.md).
 
 OpenXP does **not** support Windows programs or drivers.
 
+## Experimental native window service
+
+OpenXP now includes two separate Ring 3 example programs using copied-message,
+process-owned IPC handles. Open Terminal and run `RUN BIN/WINDOWD` followed by
+`RUN BIN/WINCLIENT` to demonstrate a request/response exchange. This does
+**not** move the existing desktop or compositor out of the kernel. For details
+and verification limits, see [Process IPC](docs/IPC.md).
+
 ## Documentation
 
 | Guide | Contents |
 | --- | --- |
+| [Process IPC](docs/IPC.md) | Process-owned handles, message transport, Ring 3 server prototype |
 | [Architecture](docs/ARCHITECTURE.md) | Kernel design, boot sequence, memory and scheduling |
 | [Desktop and input](docs/DESKTOP.md) | Controls, rendering, shell and limitations |
 | [Userspace](docs/USERSPACE.md) | ELF loader, process model and system calls |
