@@ -25,6 +25,7 @@
 #include "video/fb.h"
 #include "gui/desktop.h"
 #include "gui/native.h"
+#include "gui/shell_bridge.h"
 #include "input/input.h"
 #include "user/process.h"
 #include "user/capipc.h"
@@ -65,16 +66,18 @@ static volatile uint64_t native_wait_test_pid;
 static volatile bool native_wait_test_done, native_wait_test_ok;
 #endif
 #ifdef OPENXP_CAPIPC_SELFTEST
-static volatile uint64_t capipc_server_test_pid, capipc_client_test_pid;
-static volatile bool capipc_server_done, capipc_client_done;
-static volatile bool capipc_server_ok, capipc_client_ok;
+static volatile uint64_t capipc_server_test_pid, capipc_client_test_pids[2];
+static volatile bool capipc_server_done, capipc_client_done[2];
+static volatile bool capipc_client_ok[2];
 #endif
-static struct native_job native_jobs[NATIVE_MAX_WINDOWS];
+#define NATIVE_JOBS (NATIVE_MAX_WINDOWS + 1u)
+static struct native_job native_jobs[NATIVE_JOBS];
 static void native_worker(void *opaque) {
     struct native_job *job=(struct native_job *)opaque;
     uint64_t flags=irq_save_disable();
     process_info_t info={0};
     bool launched=process_run_preemptible(job->pid,&info);
+    shell_bridge_owner_exit(job->pid);
     native_owner_exit(job->pid);
     if(!process_reap(job->pid) && !process_cancel_ready(job->pid))
         serial_puts("OpenXP: native process cleanup failed\n");
@@ -87,12 +90,11 @@ static void native_worker(void *opaque) {
 #endif
 #ifdef OPENXP_CAPIPC_SELFTEST
     if(job->pid==capipc_server_test_pid){
-        capipc_server_ok=launched && info.state==PROCESS_EXITED && !info.status;
         capipc_server_done=true;
     }
-    if(job->pid==capipc_client_test_pid){
-        capipc_client_ok=launched && info.state==PROCESS_EXITED && !info.status;
-        capipc_client_done=true;
+    for(unsigned ci=0;ci<2;++ci)if(job->pid==capipc_client_test_pids[ci]){
+        capipc_client_ok[ci]=launched && info.state==PROCESS_EXITED && !info.status;
+        capipc_client_done[ci]=true;
     }
 #endif
     job->occupied=false;
@@ -104,7 +106,7 @@ static bool shell_launch(void *ctx,const char *path) {
     if(!initrd_lookup(path,&image,&bytes))return false;
     uint64_t flags=irq_save_disable();
     struct native_job *job=NULL;
-    for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+    for(unsigned i=0;i<NATIVE_JOBS;++i)
         if(!native_jobs[i].occupied){job=&native_jobs[i];break;}
     if(!job){irq_restore(flags);return false;}
     uint64_t pid=process_create_elf(image,bytes);
@@ -167,6 +169,7 @@ static void desktop_interactive_loop(void) {
         .file_rename=shell_file_rename,.file_remove=shell_file_remove};
     desktop_init(&desktop,&desktop_fb,services);
     native_reset();
+    shell_bridge_reset();shell_bridge_attach(&desktop);
     rtc_date_t date;
     if(rtc_read_date(&date))desktop_calendar_set_today(&desktop,date.year,date.month,date.day);
     input_state_init(&desktop_input,desktop_fb.width,desktop_fb.height);
@@ -177,6 +180,12 @@ static void desktop_interactive_loop(void) {
     serial_puts("OpenXP desktop: keyboard, mouse + COM1 terminal enabled\n");
     serial_puts("OPENXP_INPUT_OK\nOPENXP_GUI_OK\nOPENXP_SHELL_OK\nOPENXP_WM_OK\n");
     timer_enable();
+#if !defined(OPENXP_CAPIPC_SELFTEST) && !defined(OPENXP_NATIVE_WAIT_SELFTEST)
+    /* Launch the Ring 3 shell compositor/policy service automatically.
+     * If creation or startup fails the legacy kernel-hosted shell remains. */
+    if(!shell_launch(0,"bin/windowd"))
+        serial_puts("OpenXP: Ring 3 shell unavailable; legacy desktop retained\n");
+#endif
 #ifdef OPENXP_NATIVE_WAIT_SELFTEST
     /* Independently verify blocking from an actual preemptible CPL3 worker.
      * The probe waits 3 PIT ticks and exits with a failure status on error. */
@@ -204,24 +213,44 @@ static void desktop_interactive_loop(void) {
     /* Allow the server to publish before the client races its connection. */
     uint64_t wait_start=timer_ticks();
     while(timer_ticks()-wait_start<5u)__asm__ volatile("pause" ::: "memory");
-    ipc_flags=irq_save_disable();
-    bool client_started=shell_launch(0,"bin/winclient");
-    if(client_started) {
-        for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
-            if(native_jobs[i].occupied && native_jobs[i].pid!=capipc_server_test_pid)
-                capipc_client_test_pid=native_jobs[i].pid;
+    /* Both clients operate concurrently through separately accepted channels.
+     * The window service must remain alive after they finish. */
+    for(unsigned ci=0;ci<2;++ci){
+        ipc_flags=irq_save_disable();
+        bool client_started=shell_launch(0,"bin/winclient");
+        if(client_started){
+            for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+                if(native_jobs[i].occupied && native_jobs[i].pid!=capipc_server_test_pid){
+                    bool already=false;
+                    for(unsigned j=0;j<ci;++j)
+                        if(native_jobs[i].pid==capipc_client_test_pids[j])already=true;
+                    if(!already)capipc_client_test_pids[ci]=native_jobs[i].pid;
+                }
+        }
+        irq_restore(ipc_flags);
+        if(!client_started || !capipc_client_test_pids[ci]){
+            serial_puts("ERROR: concurrent window client launch failed\n");kernel_halt();
+        }
     }
-    irq_restore(ipc_flags);
-    if(!client_started){serial_puts("ERROR: window client failed to launch\n");kernel_halt();}
     wait_start=timer_ticks();
-    while((!capipc_server_done || !capipc_client_done) && timer_ticks()-wait_start<650u)
+    while((!capipc_client_done[0] || !capipc_client_done[1]) && timer_ticks()-wait_start<650u)
         __asm__ volatile("pause" ::: "memory");
-    if(!capipc_server_done || !capipc_client_done || !capipc_server_ok || !capipc_client_ok){
-        serial_puts("ERROR: Ring 3 window service IPC test failed\n");kernel_halt();
+    if(!capipc_client_done[0] || !capipc_client_done[1] ||
+       !capipc_client_ok[0] || !capipc_client_ok[1] || capipc_server_done){
+        serial_puts("ERROR: concurrent Ring 3 IPC or persistent window service failed\n");
+        kernel_halt();
     }
-    serial_puts("OPENXP_CAPIPC_OK\n");
+    /* IPC exchange alone does not prove that the graphical requests reached
+     * the native-window broker. Require create + move + focus + close. */
+    native_wm_test_counts_t wm_counts=native_wm_test_counts();
+    if(wm_counts.geometry<4u || wm_counts.raise<2u || wm_counts.close<2u){
+        serial_puts("ERROR: Window service did not reach native compositor broker\n");
+        kernel_halt();
+    }
+    serial_puts("OPENXP_WM_BRIDGE_OK\nOPENXP_WM_MULTICLIENT_OK\nOPENXP_CAPIPC_OK\n");
 #endif
     uint64_t last_second=timer_ticks()/100u;
+    bool shell_announced=false;
     for (;;) {
         /* Retired worker stacks must be reclaimed by the boot thread. */
         uint64_t reap_flags=irq_save_disable();
@@ -232,7 +261,14 @@ static void desktop_interactive_loop(void) {
         irq_restore(reap_flags);
         for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
             desktop_native_show(&desktop,i,windows[i].active);
-        bool redraw=native_changed;
+        for(unsigned i=0;i<NATIVE_MAX_WINDOWS;++i)
+            desktop_native_sync(&desktop,i,&windows[i]);
+        shell_bridge_watchdog(timer_ticks());
+        if(shell_bridge_active() && !shell_announced){
+            serial_puts("OPENXP_RING3_SHELL_READY\n");
+            shell_announced=true;
+        }
+        bool redraw=native_changed || shell_bridge_take_dirty();
         input_event_t event;
         /* Consume whole PS/2 packets rather than stopping after the first byte.
            Pure cursor movements restore only the cursor's 9x13 underlay; a
@@ -240,6 +276,9 @@ static void desktop_interactive_loop(void) {
         for(unsigned i=0;i<128 && input_poll(&desktop_input,&event);++i) {
             if(event.kind==INPUT_NONE)continue;
             desktop_tick(&desktop,timer_ticks());
+            if(shell_bridge_route(&event,shell_bridge_menu_open(),desktop_fb.height)){
+                redraw=true;continue;
+            }
             if(event.kind==INPUT_KEY) {
                 int before=desktop_top_window(&desktop);
                 bool had_menu=desktop.start_open;

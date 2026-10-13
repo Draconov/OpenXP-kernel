@@ -6,12 +6,15 @@
 #include "video/fb.h"
 #include "shell/shell.h"
 #include "input/input.h"
+#include "gui/native.h"
 
 enum { DESKTOP_TERMINAL=0, DESKTOP_FILES=1, DESKTOP_ABOUT=2, DESKTOP_NOTEPAD=3, DESKTOP_CALCULATOR=4, DESKTOP_PAINT=5, DESKTOP_MONITOR=6, DESKTOP_SETTINGS=7, DESKTOP_MINES=8, DESKTOP_CLOCK=9, DESKTOP_SNAKE=10, DESKTOP_RUN=11, DESKTOP_WORDPAD=12, DESKTOP_CALENDAR=13, DESKTOP_NATIVE=14, DESKTOP_NATIVE2=15, DESKTOP_NATIVE3=16, DESKTOP_WINDOWS=17 };
 typedef struct { int x,y,w,h; bool open,minimized; } desktop_window_t;
 typedef struct {
     fb_surface_t *surface;
     desktop_window_t windows[DESKTOP_WINDOWS];
+    uint32_t wm_seen_geometry[NATIVE_MAX_WINDOWS];
+    uint32_t wm_seen_focus[NATIVE_MAX_WINDOWS];
     int order[DESKTOP_WINDOWS]; /* low to high: focused window last */
     bool start_open,dragging,mouse_down,right_down,showing_desktop;
     bool saved_minimized[DESKTOP_WINDOWS];
@@ -71,7 +74,17 @@ typedef struct {
     bool cursor_painted;
 } desktop_t;
 void desktop_init(desktop_t *d,fb_surface_t *s,shell_services_t services);
+/* Privileged execution of decisions made by the native Ring 3 shell. */
+bool desktop_shell_open(desktop_t *d,uint32_t index);
+bool desktop_shell_close(desktop_t *d);
+void desktop_shell_desktop(desktop_t *d);
+bool desktop_shell_task(desktop_t *d,uint32_t index);
+bool desktop_shell_focus(desktop_t *d,uint32_t index);
+const char *desktop_shell_title(desktop_t *d,uint32_t index);
 void desktop_native_show(desktop_t *d,unsigned slot,bool showing);
+/* Reconcile trusted kernel window metadata with the existing compositor.
+ * Still Ring 0 composition; windowd authorizes remote move/focus commands. */
+void desktop_native_sync(desktop_t *d,unsigned slot,const native_window_t *native);
 void desktop_calendar_set_today(desktop_t *d,unsigned year,unsigned month,unsigned day);
 unsigned desktop_calendar_days(unsigned year,unsigned month);
 unsigned desktop_calendar_weekday(unsigned year,unsigned month,unsigned day);

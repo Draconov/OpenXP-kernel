@@ -41,6 +41,8 @@ static inline int64_t oxp_close(uint64_t h){return (int64_t)oxp_call(18,h,0);}
 /* 0 means wait for incoming connection; other handles wait for messages.
  * 0 ticks = indefinite park; positive ticks = relative timer deadline. */
 static inline int64_t oxp_ipc_wait(uint64_t h,uint64_t ticks){return (int64_t)oxp_call(19,h,ticks);}
+/* Trusted windowd service only: wake on new connection, data, or disconnect. */
+static inline int64_t oxp_ipc_wait_any(uint64_t ticks){return oxp_ipc_wait(UINT64_MAX,ticks);}
 static inline size_t oxp_len(const char *s){size_t n=0;while(s[n])++n;return n;}
 static inline int oxp_open(const char *s){return (int)oxp_call(6,(uint64_t)s,oxp_len(s));}
 static inline int oxp_text(const char *s){return (int)oxp_call(7,(uint64_t)s,oxp_len(s));}

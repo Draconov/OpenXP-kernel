@@ -29,6 +29,18 @@ int main(void) {
     assert(!strcmp(a.text,"hello\nworld"));
     assert(!strcmp(b.text,"clock")&&!strcmp(c.text,"note"));
     assert(native_dirty_take());
+    /* Real WM geometry and focus commands go only to an existing PID. */
+    assert(!native_wm_manage(45,1,10,20,220,120));
+    assert(!native_wm_manage(42,1,950,20,220,120));
+    assert(!native_wm_manage(42,1,40,700,220,120));
+    assert(!native_wm_manage(42,99,0,0,0,0));
+    assert(native_wm_manage(42,1,10,20,220,120));
+    uint32_t geom=native_snapshot_slot(0).wm_geometry_serial;
+    assert(geom && native_snapshot_slot(0).wm_width==220);
+    assert(native_wm_manage(42,2,0,0,0,0));
+    assert(native_snapshot_slot(0).wm_focus_serial>geom);
+    assert(native_snapshot_slot(1).wm_geometry_serial==0);
+    assert(native_dirty_take());
     native_push_event_slot(1,'C');
     native_push_event_slot(2,NATIVE_EVENT_CLICK | (39u<<10) | 51u);
     assert(native_next_event(42)==0);
@@ -50,6 +62,13 @@ int main(void) {
     assert(native_open(100,"New",3) && native_slot_for_owner(100)==1);
     assert(native_set_text(100,"new",3));
     assert(native_next_event(100)==0);
+    assert(native_snapshot_slot(1).wm_geometry_serial==0);
+    assert(native_wm_manage(100,1,70,96,240,140));
+    assert(native_snapshot_slot(1).wm_x==70);
+    assert(native_wm_manage(100,3,0,0,0,0));
+    assert(native_next_event(100)==NATIVE_EVENT_CLOSE);
+    /* Reopen is allowed after a polite close request. */
+    assert(native_open(100,"New",3));
     assert(native_snapshot_slot(NATIVE_MAX_WINDOWS).active==false);
     assert(native_dirty_take());
 

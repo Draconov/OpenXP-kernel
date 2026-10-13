@@ -16,7 +16,7 @@ struct endpoint {
 };
 static struct endpoint ep[CAPIPC_MAX_ENDPOINTS];
 static uint32_t generations[CAPIPC_MAX_ENDPOINTS];
-static uint64_t authorized_server, listening_server, accept_waiter;
+static uint64_t authorized_server, listening_server, accept_waiter, any_waiter;
 
 static uint64_t lock_ipc(void) {
 #ifndef OPENXP_CAPIPC_HOST_TEST
@@ -62,17 +62,19 @@ static void close_slot(unsigned i) {
     if(!ep[i].used)return;
     uint32_t other=ep[i].peer;
     wake(ep[i].waiter);
+    if(ep[i].pid==listening_server)wake(any_waiter);
     if(other<CAPIPC_MAX_ENDPOINTS && ep[other].used && ep[other].peer==i) {
         ep[other].peer=INVALID_SLOT;
         ep[other].peer_closed=true;
         wake(ep[other].waiter);
+        if(ep[other].pid==listening_server)wake(any_waiter);
     }
     wipe(i);
 }
 void capipc_init(void) {
     uint64_t flags=lock_ipc();
     for(unsigned i=0;i<CAPIPC_MAX_ENDPOINTS;++i)wipe(i);
-    authorized_server=0;listening_server=0;accept_waiter=0;
+    authorized_server=0;listening_server=0;accept_waiter=0;any_waiter=0;
     unlock_ipc(flags);
 }
 bool capipc_grant_server(uint64_t pid) {
@@ -81,6 +83,11 @@ bool capipc_grant_server(uint64_t pid) {
     bool ok=!authorized_server && !listening_server;
     if(ok)authorized_server=pid;
     unlock_ipc(flags);return ok;
+}
+bool capipc_is_server(uint64_t pid){
+    uint64_t flags=lock_ipc();
+    bool result=pid && pid==authorized_server && pid==listening_server;
+    unlock_ipc(flags);return result;
 }
 capipc_result_t capipc_listen(uint64_t pid) {
     uint64_t flags=lock_ipc();
@@ -107,6 +114,7 @@ capipc_result_t capipc_connect(uint64_t pid,uint64_t *handle) {
     ep[b]=(struct endpoint){.used=true,.accepted=false,.pid=listening_server,.generation=gb,.peer=(uint32_t)a};
     *handle=token((unsigned)a);
     wake(accept_waiter);
+    wake(any_waiter);
     unlock_ipc(flags);return CAPIPC_OK;
 }
 capipc_result_t capipc_accept(uint64_t pid,uint64_t *handle) {
@@ -136,6 +144,7 @@ capipc_result_t capipc_send(uint64_t pid,uint64_t handle,const void *buf,size_t 
     dst->queue[tail].len=(uint8_t)len;
     ++dst->count;
     wake(dst->waiter);
+    if(dst->pid==listening_server)wake(any_waiter);
     unlock_ipc(flags);return CAPIPC_OK;
 }
 capipc_result_t capipc_receive(uint64_t pid,uint64_t handle,void *buf,size_t cap,size_t *len) {
@@ -158,11 +167,30 @@ capipc_result_t capipc_close(uint64_t pid,uint64_t handle) {
     if(i<0){unlock_ipc(flags);return CAPIPC_DENIED;}
     close_slot((unsigned)i);unlock_ipc(flags);return CAPIPC_OK;
 }
+bool capipc_server_peer(uint64_t server_pid,uint64_t handle,uint64_t *peer_pid) {
+    if(!peer_pid)return false;
+    *peer_pid=0;
+    uint64_t flags=lock_ipc();
+    int i=lookup(server_pid,handle);
+    bool ok=false;
+    if(server_pid && server_pid==authorized_server && server_pid==listening_server && i>=0) {
+        const struct endpoint *self=&ep[i];
+        unsigned peer=self->peer;
+        if(self->accepted && !self->peer_closed && peer<CAPIPC_MAX_ENDPOINTS &&
+           ep[peer].used && ep[peer].accepted && ep[peer].peer==(uint32_t)i &&
+           ep[peer].pid && ep[peer].pid!=server_pid) {
+            *peer_pid=ep[peer].pid;
+            ok=true;
+        }
+    }
+    unlock_ipc(flags);
+    return ok;
+}
 void capipc_process_exit(uint64_t pid) {
     if(!pid)return;
     uint64_t flags=lock_ipc();
     if(authorized_server==pid)authorized_server=0;
-    if(listening_server==pid){listening_server=0;wake(accept_waiter);accept_waiter=0;}
+    if(listening_server==pid){listening_server=0;wake(accept_waiter);wake(any_waiter);accept_waiter=0;any_waiter=0;}
     for(unsigned i=0;i<CAPIPC_MAX_ENDPOINTS;++i)
         if(ep[i].used && ep[i].pid==pid)close_slot(i);
     unlock_ipc(flags);
@@ -172,7 +200,15 @@ capipc_result_t capipc_wait(uint64_t pid,uint64_t handle,uint64_t timeout_ticks)
     uint64_t flags=lock_ipc();
     uint64_t *waiter=NULL;
     bool ready=false;
-    if(handle==CAPIPC_SERVER_WAIT_HANDLE){
+    if(handle==CAPIPC_ANY_WAIT_HANDLE){
+        if(pid!=listening_server){unlock_ipc(flags);return CAPIPC_DENIED;}
+        for(unsigned i=0;i<CAPIPC_MAX_ENDPOINTS;++i) {
+            if(!ep[i].used || ep[i].pid!=pid)continue;
+            if(!ep[i].accepted && !ep[i].peer_closed)ready=true;
+            if(ep[i].accepted && (ep[i].count || ep[i].peer_closed))ready=true;
+        }
+        waiter=&any_waiter;
+    }else if(handle==CAPIPC_SERVER_WAIT_HANDLE){
         if(pid!=listening_server){unlock_ipc(flags);return CAPIPC_DENIED;}
         for(unsigned i=0;i<CAPIPC_MAX_ENDPOINTS;++i)
             if(ep[i].used && ep[i].pid==pid && !ep[i].accepted && !ep[i].peer_closed)ready=true;
@@ -191,7 +227,9 @@ capipc_result_t capipc_wait(uint64_t pid,uint64_t handle,uint64_t timeout_ticks)
     bool slept=timeout_ticks?scheduler_sleep_current_locked(timeout_ticks):scheduler_park_current_locked();
     /* Slot may have been recycled during sleep: never dereference the old
      * waiter pointer unless the handle still names the original endpoint. */
-    if(handle==0) {
+    if(handle==CAPIPC_ANY_WAIT_HANDLE) {
+        if(listening_server==pid && any_waiter==tid)any_waiter=0;
+    }else if(handle==CAPIPC_SERVER_WAIT_HANDLE) {
         if(listening_server==pid && accept_waiter==tid)accept_waiter=0;
     }else{
         int i=lookup(pid,handle);

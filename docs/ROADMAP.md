@@ -95,13 +95,24 @@ preemption, protection or hardware input are correct.
       separate Ring 3 processes. **Partial:** `bin/windowd` is now an actual
       Ring 3 service executable with process-owned IPC channels and a separate
       `bin/winclient` demonstration. The existing desktop, composition,
-      taskbar and window-manager authority **still run in Ring 0**.
-      Live QEMU integration remains unverified.
+      initial framebuffer drawing and legacy windows **still run in Ring 0**.
+      The versioned window service can control native window geometry, focus
+      and close via peer-verified IPC. **A new Ring 3 taskbar/Start-menu pilot**
+      owns shell layout, menu selection, shortcuts and focus requests. It
+      submits a bounded drawing-command list that the privileged kernel
+      validates and blits. The original desktop remains a watchdog-backed
+      fallback. Legacy application windows, wallpaper and final framebuffer
+      composition remain in Ring 0. The new boot test is unverified in a VM.
+- [x] Add a capability-gated Ring 3 shell command/event ABI with bounded
+      drawing lists, keyboard/mouse focus dispatch, service watchdog and
+      legacy fallback. Compilation and host tests pass; VM behavior unverified.
 - [ ] Migrate *all* legacy built-ins (Paint, WordPad, Calendar, Mines, Snake,
       Settings, file manager, Terminal, etc.) without losing features.
 - [ ] Add a stable SDK, dynamic libraries/resources and installable apps.
-- [ ] Support full native ELF segments, relocations and separate on-disk
-      executable loading rather than embedded files.
+- [x] Package native applications with a distinct read+execute image and
+      zero-initialized read+write segment; host-tested, VM execution unverified.
+- [ ] Support full native ELF segments, initialized mutable data, relocations
+      and separate on-disk executable loading rather than embedded files.
 
 ## Filesystems, storage and terminal
 
@@ -188,3 +199,37 @@ preemption, protection or hardware input are correct.
 
 A checkmark means the specified scope exists and has the indicated evidence;
 it is **not** a claim that the entire operating system is finished.
+
+## Window-service compositor bridge
+
+- [x] Connect service `CREATE`/`MOVE`/`FOCUS`/`CLOSE` to live native-window
+  geometry, focus and close events through a privileged, peer-bound syscall.
+- [x] Require an accepted IPC channel owned by the authorized window server;
+  prevent clients from controlling unrelated windows through forged PIDs.
+- [x] Transfer taskbar/Start-menu layout and focus/shortcut policy into a
+      privileged-service-authenticated Ring 3 process (host-tested source).
+- [ ] Transfer final framebuffer composition, legacy window drawing and all
+      drag policy to Ring 3. The kernel still paints physical pixels.
+- [ ] Run `make smoke-window-ipc` in QEMU and verify geometry changes visually
+  in VirtualBox. Host test success alone does not prove guest behavior.
+
+## Persistent Ring 3 window-service IPC
+
+- [x] Keep `windowd` alive across multiple client sessions; accept up to six
+  channels, constrained by the current fixed twelve-endpoint IPC table.
+- [x] Add a server-only `IPC_WAIT` selector for connections, data on any
+  accepted channel, and peer disconnects (host tests and sanitizer pass).
+- [x] Implement fair bounded request dispatch and automatic logical-window
+  cleanup when clients disconnect; preserve stale-window-ID protection.
+- [x] Add a diagnostic build that launches two concurrent WM clients and
+  checks that `windowd` remains alive after both complete. **VM test pending.**
+- [ ] Verify persistent multi-client execution in QEMU/VirtualBox and check
+  mouse interaction, focus switching and compositor geometry visually.
+- [x] Route shell mouse clicks, global keyboard shortcuts and mouse focus
+      selection to `windowd`, with a three-second heartbeat fallback.
+- [ ] Move all window composition, legacy desktop applications and draggable
+      window policy to Ring 3. The kernel compositor remains active.
+- [x] Automatically launch `windowd` during normal boot; keep diagnostic mode
+      independent and retain the kernel desktop after service failure.
+- [ ] Add automatic restart supervision, dedicated service-only process slots,
+      reliable input delivery under burst load, and shell-level crash telemetry.

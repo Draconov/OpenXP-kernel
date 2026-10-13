@@ -2,6 +2,9 @@
 #include "fs/initrd.h"
 #include "fs/ramfs.h"
 #include "gui/native.h"
+#ifndef OPENXP_WM_HOST_TEST
+#include "gui/shell_bridge.h"
+#endif
 #include <stdint.h>
 #include <stddef.h>
 #ifndef OPENXP_WM_HOST_TEST
@@ -10,6 +13,7 @@
 
 extern const char *const desktop_titles[DESKTOP_WINDOWS];
 static void snake_reset(desktop_t *d);
+static void show_desktop(desktop_t *d);
 static void file_preview_selected(desktop_t *d);
 static void uint_text(uint64_t value,char *buffer);
 static uint32_t rgb(desktop_t *d,uint8_t r,uint8_t g,uint8_t b){return fb_rgb(d->surface,r,g,b);}
@@ -106,6 +110,38 @@ static void open_window(desktop_t *d,int which) {
     if(which==DESKTOP_TERMINAL)d->shell.visible=true;
     d->showing_desktop=false;
     focus(d,which);
+}
+bool desktop_shell_close(desktop_t *d){
+    if(!d)return false;
+    int top=desktop_top_window(d);
+    if(top<0)return false;
+    if(top>=DESKTOP_NATIVE){native_close_request_slot((unsigned)(top-DESKTOP_NATIVE));}
+    else d->windows[top].open=false;
+    return true;
+}
+void desktop_shell_desktop(desktop_t *d){if(d)show_desktop(d);}
+bool desktop_shell_open(desktop_t *d,uint32_t index){
+    if(!d||index>=DESKTOP_NATIVE)return false;
+    open_window(d,(int)index);return true;
+}
+bool desktop_shell_task(desktop_t *d,uint32_t index){
+    if(!d||index>=DESKTOP_WINDOWS||!d->windows[index].open)return false;
+    if(desktop_top_window(d)==(int)index)d->windows[index].minimized=true;
+    else {d->windows[index].minimized=false;focus(d,(int)index);}
+    return true;
+}
+bool desktop_shell_focus(desktop_t *d,uint32_t index){
+    if(!d||index>=DESKTOP_WINDOWS||!d->windows[index].open)return false;
+    d->windows[index].minimized=false;focus(d,(int)index);return true;
+}
+const char *desktop_shell_title(desktop_t *d,uint32_t index){
+    if(!d||index>=DESKTOP_WINDOWS)return "";
+    if(index>=DESKTOP_NATIVE){
+        /* Use stable generic native names. Window titles remain kernel-owned
+         * and are rendered by the legacy window compositor. */
+        return "Native app";
+    }
+    return desktop_titles[index];
 }
 void desktop_init(desktop_t *d,fb_surface_t *s,shell_services_t services) {
     *d=(desktop_t){0};d->surface=s;
@@ -609,6 +645,30 @@ void desktop_native_show(desktop_t *d,unsigned slot,bool showing) {
     int index=DESKTOP_NATIVE+(int)slot;
     if(showing && !d->windows[index].open)open_window(d,index);
     if(!showing && d->windows[index].open)d->windows[index].open=false;
+}
+void desktop_native_sync(desktop_t *d,unsigned slot,const native_window_t *native){
+    if(!d||!native||slot>=NATIVE_MAX_WINDOWS)return;
+    if(!native->active){
+        d->wm_seen_geometry[slot]=0;
+        d->wm_seen_focus[slot]=0;
+        return;
+    }
+    int index=DESKTOP_NATIVE+(int)slot;
+    if(native->wm_geometry_serial && native->wm_geometry_serial!=d->wm_seen_geometry[slot]){
+        d->wm_seen_geometry[slot]=native->wm_geometry_serial;
+        desktop_window_t *w=&d->windows[index];
+        /* Keep all titlebar controls visible inside the framebuffer. */
+        if(native->wm_width>=120u && native->wm_height>=80u &&
+           native->wm_x+native->wm_width<=(unsigned)d->surface->width &&
+           native->wm_y+native->wm_height+42u<=(unsigned)d->surface->height){
+            w->x=(int)native->wm_x;w->y=(int)native->wm_y;
+            w->w=(int)native->wm_width;w->h=(int)native->wm_height;
+        }
+    }
+    if(native->wm_focus_serial && native->wm_focus_serial!=d->wm_seen_focus[slot]){
+        d->wm_seen_focus[slot]=native->wm_focus_serial;
+        if(d->windows[index].open)open_window(d,index);
+    }
 }
 void desktop_calendar_set_today(desktop_t *d,unsigned year,unsigned month,unsigned day){
     if(!d||year<1600||year>9999||day<1||day>desktop_calendar_days(year,month))return;
@@ -1141,6 +1201,9 @@ static void draw_window(desktop_t *d,int index,bool active) {
     }
 }
 static void draw_taskbar(desktop_t *d) {
+#ifndef OPENXP_WM_HOST_TEST
+    if(shell_bridge_active())return;
+#endif
     int h=d->surface->height,w=d->surface->width;
     fill(d,0,h-42,w,42,20,69,164);
     fill(d,0,h-42,w,3,98,156,243);
@@ -1173,6 +1236,9 @@ static void draw_taskbar(desktop_t *d) {
     text(d,w-78,h-25,timer,1,255,255,255);
 }
 static void draw_menu(desktop_t *d) {
+#ifndef OPENXP_WM_HOST_TEST
+    if(shell_bridge_active())return;
+#endif
     if(!d->start_open)return;
     int h=d->surface->height,y=h-42-370;
     fill(d,2,y,500,370,238,245,255);
@@ -1233,6 +1299,9 @@ void desktop_draw(desktop_t *d) {
     for(int z=0;z<DESKTOP_WINDOWS;++z)
         draw_window(d,d->order[z],d->order[z]==top);
     draw_taskbar(d);draw_menu(d);
+#ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose(d->surface);
+#endif
     cursor_paint(d);
 }
 void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index) {
@@ -1251,6 +1320,9 @@ void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index) {
     for(int z=0;z<DESKTOP_WINDOWS;++z)
         draw_window(d,d->order[z],d->order[z]==top);
     draw_taskbar(d);draw_menu(d);
+#ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose(d->surface);
+#endif
     fb_clip_clear(s);
     cursor_paint(d);
 }
@@ -1258,6 +1330,9 @@ void desktop_redraw_taskbar(desktop_t *d) {
     if(!d || !d->surface)return;
     cursor_restore(d);
     draw_taskbar(d);
+#ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose(d->surface);
+#endif
     cursor_paint(d);
 }
 void desktop_redraw_active(desktop_t *d) {
@@ -1266,6 +1341,9 @@ void desktop_redraw_active(desktop_t *d) {
     if(top<0)return;
     cursor_restore(d);
     draw_window(d,top,true);
+#ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose(d->surface);
+#endif
     cursor_paint(d);
 }
 void desktop_redraw_paint(desktop_t *d){
@@ -1277,6 +1355,9 @@ void desktop_redraw_paint(desktop_t *d){
     cursor_restore(d);
     fb_clip_set(d->surface,x,y,width,height);
     draw_window(d,DESKTOP_PAINT,true);
+#ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose(d->surface);
+#endif
     fb_clip_clear(d->surface);
     cursor_paint(d);
     d->paint_dirty=false;
@@ -1321,7 +1402,12 @@ static void desktop_click(desktop_t *d,int x,int y) {
             else {w->open=false;}
             return;}
         if(y<w->y+33 && x>=w->x+w->w-57){w->minimized=true;return;}
+#ifndef OPENXP_WM_HOST_TEST
+        if(shell_bridge_active())shell_bridge_notify_focus((uint32_t)i);
+        else focus(d,i);
+#else
         focus(d,i);
+#endif
         if(i>=DESKTOP_NATIVE){
             unsigned xlocal=(unsigned)(x-w->x);
             unsigned ylocal=(unsigned)(y-w->y);

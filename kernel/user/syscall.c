@@ -2,9 +2,11 @@
 #include "user/userspace.h"
 #include "user/process.h"
 #include "user/capipc.h"
+#include "user/wm_display.h"
 #include "arch/x86_64/timer.h"
 #include "serial.h"
 #include "gui/native.h"
+#include "gui/shell_bridge.h"
 #include "fs/vfs.h"
 #include <stddef.h>
 
@@ -139,6 +141,68 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
             r==CAPIPC_CLOSED?OPENXP_EPIPE:r==CAPIPC_NOSPACE?OPENXP_ENOSPC:
             r==CAPIPC_DENIED?OPENXP_EPERM:OPENXP_EINVAL;
         return (struct syscall_result){0,(uint64_t)-(uint64_t)err};
+    }
+    case OPENXP_SYS_WM_DISPLAY: {
+        /* Privilege is granted by the kernel to the immutable windowd
+         * image. The accepted channel is also checked for a live peer;
+         * the server cannot name an unrelated process or a kernel window. */
+        uint64_t target_pid=0;
+        if(!capipc_server_peer(process_current_pid(),frame->rdi,&target_pid))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        const address_space_t *space=userspace_current_space();
+        if(frame->rdx!=sizeof(openxp_wm_display_cmd_t) || !space)
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(!aspace_range_valid(space,frame->rsi,sizeof(openxp_wm_display_cmd_t),false))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        openxp_wm_display_cmd_t command;
+        if(!aspace_copy_from_user(space,&command,frame->rsi,sizeof(command)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,
+            native_wm_manage(target_pid,command.action,command.x,command.y,
+                             command.width,command.height)?0u:(uint64_t)-OPENXP_EINVAL};
+    }
+    case OPENXP_SYS_SHELL_EVENT:
+    case OPENXP_SYS_SHELL_WINDOW:
+    case OPENXP_SYS_SHELL_FRAME:
+    case OPENXP_SYS_SHELL_ACTION: {
+        /* The trusted, immutable windowd boot-image has the unique IPC
+         * listener capability. Ordinary Ring 3 processes get EPERM. */
+        uint64_t pid=process_current_pid();
+        if(!capipc_is_server(pid))return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        const address_space_t *space=userspace_current_space();
+        if(!space)return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        if(frame->rax==OPENXP_SYS_SHELL_ACTION)
+            return (struct syscall_result){0,shell_bridge_action((uint32_t)frame->rdi,
+                    (uint32_t)frame->rsi)?0u:(uint64_t)-OPENXP_EINVAL};
+        if(frame->rax==OPENXP_SYS_SHELL_EVENT){
+            oxp_shell_event_t event={0};
+            if(frame->rsi!=sizeof(event) ||
+               !aspace_range_valid(space,frame->rdi,sizeof(event),true))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+            if(!shell_bridge_pop(&event))return (struct syscall_result){0,0};
+            if(!aspace_copy_to_user((address_space_t *)space,frame->rdi,&event,sizeof(event)))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+            return (struct syscall_result){0,1};
+        }
+        if(frame->rax==OPENXP_SYS_SHELL_WINDOW){
+            oxp_shell_window_t info={0};
+            if(frame->rdx!=sizeof(info) ||
+               !aspace_range_valid(space,frame->rsi,sizeof(info),true))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+            if(!shell_bridge_window((uint32_t)frame->rdi,&info))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+            if(!aspace_copy_to_user((address_space_t *)space,frame->rsi,&info,sizeof(info)))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+            return (struct syscall_result){0,0};
+        }
+        size_t count=(size_t)frame->rsi;
+        if(!count || count>OXP_SHELL_DRAW_MAX ||
+           !aspace_range_valid(space,frame->rdi,count*sizeof(oxp_shell_draw_t),false))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        oxp_shell_draw_t buffer[OXP_SHELL_DRAW_MAX];
+        if(!aspace_copy_from_user(space,buffer,frame->rdi,count*sizeof(oxp_shell_draw_t)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,shell_bridge_submit(pid,buffer,(uint32_t)count,timer_ticks())?0u:(uint64_t)-OPENXP_EINVAL};
     }
     case OPENXP_SYS_EXIT:
         native_owner_exit(process_current_pid());

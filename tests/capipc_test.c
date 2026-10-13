@@ -60,6 +60,30 @@ static void test_client_quota(void) {
     assert(capipc_close(8,a)==CAPIPC_OK);
     assert(capipc_connect(8,&c)==CAPIPC_OK);
 }
+static void test_server_wait_any(void){
+    capipc_init();
+    assert(capipc_grant_server(50));
+    assert(capipc_listen(50)==CAPIPC_OK);
+    assert(capipc_wait(51,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_DENIED);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_EMPTY);
+    uint64_t a=0,b=0,c=0,d=0;
+    assert(capipc_connect(60,&a)==CAPIPC_OK);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_OK);
+    assert(capipc_accept(50,&b)==CAPIPC_OK);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_EMPTY);
+    assert(capipc_connect(61,&c)==CAPIPC_OK);
+    assert(capipc_accept(50,&d)==CAPIPC_OK);
+    assert(capipc_send(61,c,"2",1)==CAPIPC_OK);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_OK);
+    char tmp[2]={0};size_t len=0;
+    assert(capipc_receive(50,d,tmp,sizeof(tmp),&len)==CAPIPC_OK && len==1);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_EMPTY);
+    assert(capipc_close(60,a)==CAPIPC_OK);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_OK);
+    assert(capipc_close(50,b)==CAPIPC_OK);
+    assert(capipc_wait(50,CAPIPC_ANY_WAIT_HANDLE,5)==CAPIPC_EMPTY);
+    assert(capipc_close(50,d)==CAPIPC_OK);
+}
 static void test_overflow_and_exit(void){
     capipc_init();assert(capipc_grant_server(50));assert(capipc_listen(50)==CAPIPC_OK);
     uint64_t client=0,server=0;
@@ -75,4 +99,4 @@ static void test_overflow_and_exit(void){
     assert(capipc_receive(50,server,payload,sizeof(payload),&n)==CAPIPC_CLOSED);
     assert(capipc_close(50,server)==CAPIPC_OK);
 }
-int main(void){test_exchange();test_reuse_and_limits();test_overflow_and_exit();test_client_quota();puts("capipc_test: passed");return 0;}
+int main(void){test_exchange();test_reuse_and_limits();test_overflow_and_exit();test_client_quota();test_server_wait_any();puts("capipc_test: passed");return 0;}

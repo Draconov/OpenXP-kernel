@@ -23,9 +23,12 @@ Limine (BIOS / UEFI)
           └─ Private address spaces, ELF64 loader, int 0x80 syscalls
 ```
 
-The desktop renderer/window manager is **inside the kernel**. Native user
-programs now have a deliberately narrow Ring 3 text-window and keyboard-event
-syscall bridge, but the old desktop programs remain kernel-hosted. The native
+The kernel still owns the **final framebuffer drawing** and legacy program
+windows. A trusted `bin/windowd` Ring 3 process now supplies the taskbar and
+Start-menu drawing commands, global shell shortcuts and focus policy. The
+kernel validates each command and restores its original shell when the service
+stops. Other native programs have bounded drawing surfaces and an event ABI;
+most historical built-ins remain kernel-hosted. The native
 application pilot is described in [Native applications](NATIVE-APPS.md).
 
 ## Boot sequence

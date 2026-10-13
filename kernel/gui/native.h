@@ -35,6 +35,10 @@ typedef struct {
     unsigned head,tail;
     /* Internal scheduler thread waiting for an event, never a userspace ptr. */
     uint64_t waiter;
+    /* Service-requested compositor state, copied from trusted kernel storage.
+     * Generation counters let the desktop apply each command just once. */
+    uint32_t wm_x, wm_y, wm_width, wm_height;
+    uint32_t wm_geometry_serial, wm_focus_serial;
 } native_window_t;
 void native_reset(void);
 bool native_open(uint64_t pid,const char *title,size_t n);
@@ -50,6 +54,10 @@ void native_close_request_slot(unsigned slot);
 void native_owner_exit(uint64_t pid);
 native_window_t native_snapshot_slot(unsigned slot);
 bool native_dirty_take(void);
+/* Only reachable from the authorized IPC server syscall after peer lookup.
+ * No framebuffer address or arbitrary PID is exposed to userspace. */
+bool native_wm_manage(uint64_t client_pid, uint32_t action, uint32_t x, uint32_t y,
+                      uint32_t width, uint32_t height);
 /* Accept a bounded batch atomically: ownership and all rectangles are
  * verified before modifying any pixel. Colors are 0x00RRGGBB. */
 bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count);
@@ -57,6 +65,11 @@ bool native_has_surface(unsigned slot);
 bool native_copy_surface_row(unsigned slot, unsigned y, uint16_t *dst, size_t cap);
 #ifdef OPENXP_NATIVE_HOST_TEST
 uint16_t native_test_pixel(unsigned slot, unsigned x, unsigned y);
+#endif
+#ifdef OPENXP_CAPIPC_SELFTEST
+/* Test-only counters verify live Ring 3 service-to-compositor requests. */
+typedef struct {uint32_t geometry,raise,close;} native_wm_test_counts_t;
+native_wm_test_counts_t native_wm_test_counts(void);
 #endif
 /* Compatibility interface for existing one-window tests. */
 native_window_t native_snapshot(void);

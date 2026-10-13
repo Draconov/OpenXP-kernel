@@ -1,4 +1,5 @@
 #include "gui/native.h"
+#include "user/wm_display.h"
 #include "video/fb.h"
 #if !defined(OPENXP_NATIVE_HOST_TEST) || defined(OPENXP_NATIVE_WAIT_HOST_TEST)
 #include "sched/scheduler.h"
@@ -12,6 +13,15 @@ static native_window_t windows[NATIVE_MAX_WINDOWS];
 static bool dirty_any;
 static uint16_t pixels[NATIVE_MAX_WINDOWS][NATIVE_SURFACE_W * NATIVE_SURFACE_H];
 static bool painted[NATIVE_MAX_WINDOWS];
+static uint32_t wm_serial_counter;
+#ifdef OPENXP_CAPIPC_SELFTEST
+static native_wm_test_counts_t wm_test_counts;
+#endif
+static uint32_t next_wm_serial(void){
+    ++wm_serial_counter;
+    if(!wm_serial_counter)++wm_serial_counter;
+    return wm_serial_counter;
+}
 static uint16_t rgb565(uint32_t rgb) {
     return (uint16_t)((((rgb >> 16) & 0xffu) >> 3u) << 11u |
                       ((((rgb >> 8) & 0xffu) >> 2u) << 5u) |
@@ -37,6 +47,14 @@ static int find_owner(uint64_t pid){
         if(windows[i].active&&windows[i].owner==pid)return (int)i;
     return -1;
 }
+#ifdef OPENXP_CAPIPC_SELFTEST
+native_wm_test_counts_t native_wm_test_counts(void){
+    uint64_t flags=lock_irq();
+    native_wm_test_counts_t copy=wm_test_counts;
+    unlock_irq(flags);
+    return copy;
+}
+#endif
 static void wake_thread(uint64_t waiter) {
 #if !defined(OPENXP_NATIVE_HOST_TEST) || defined(OPENXP_NATIVE_WAIT_HOST_TEST)
     if (waiter) (void)scheduler_wake(waiter); /* caller holds IF=0 */
@@ -167,6 +185,37 @@ void native_owner_exit(uint64_t pid){
 native_window_t native_snapshot_slot(unsigned slot){
     if(slot>=NATIVE_MAX_WINDOWS)return (native_window_t){0};
     uint64_t flags=lock_irq();native_window_t copy=windows[slot];unlock_irq(flags);return copy;
+}
+bool native_wm_manage(uint64_t client_pid, uint32_t action, uint32_t x, uint32_t y,
+                      uint32_t width, uint32_t height) {
+    if(!client_pid)return false;
+    if(action==OPENXP_WM_SET_RECT) {
+        /* Fixed virtual screen for the initial 1024x768 framebuffer mode.
+         * The bottom 40 pixels are reserved for the taskbar. */
+        if(width<120u || width>640u || height<80u || height>480u ||
+           x>1024u-width || y>728u-height)return false;
+    }else if(action!=OPENXP_WM_RAISE && action!=OPENXP_WM_REQUEST_CLOSE)return false;
+    uint64_t flags=lock_irq();
+    int slot=find_owner(client_pid);
+    if(slot<0){unlock_irq(flags);return false;}
+    native_window_t *w=&windows[slot];
+    if(action==OPENXP_WM_SET_RECT){
+        w->wm_x=x;w->wm_y=y;w->wm_width=width;w->wm_height=height;
+        w->wm_geometry_serial=next_wm_serial();
+    } else if(action==OPENXP_WM_RAISE){
+        w->wm_focus_serial=next_wm_serial();
+    } else {
+        w->closing=true;
+        wake_thread(w->waiter);
+    }
+#ifdef OPENXP_CAPIPC_SELFTEST
+    if(action==OPENXP_WM_SET_RECT)++wm_test_counts.geometry;
+    else if(action==OPENXP_WM_RAISE)++wm_test_counts.raise;
+    else ++wm_test_counts.close;
+#endif
+    w->dirty=true;dirty_any=true;
+    unlock_irq(flags);
+    return true;
 }
 bool native_dirty_take(void){
     uint64_t flags=lock_irq();bool was_dirty=dirty_any;dirty_any=false;

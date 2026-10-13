@@ -14,7 +14,7 @@ profile inside the read-only `OXRD` boot archive.
 | `apps/native/notepad.c` | `bin/notepad` | Editable note with temporary RAM saving |
 | `apps/native/probe.c` | `bin/probe` | Synchronous GUI and RAM-file ABI smoke probe |
 | `apps/native/waitprobe.c` | `bin/waitprobe` | Preemptible Ring 3 GUI wait and timeout smoke probe |
-| `apps/native/windowd.c` | `bin/windowd` | Prototype authorized Ring 3 window-service process; IPC PING/PONG |
+| `apps/native/windowd.c` | `bin/windowd` | Trusted Ring 3 shell/window-policy service with IPC and bounded drawing commands |
 | `apps/native/winclient.c` | `bin/winclient` | Separate Ring 3 client that connects to the window service |
 | `apps/native/canvas.c` | `bin/canvas` | Demonstrates independent process-owned pixel drawing and click events |
 
@@ -61,10 +61,13 @@ buffers through the process address-space mapping.
 Native app source includes `apps/native/oxp.h`. A tiny `_start` assembly stub
 calls `oxp_main()` with the expected System V AMD64 C stack alignment. The
 freestanding runtime supplies the required memory primitives without a libc.
-The linker creates a flat reloc-free binary, and `tools/mkinitrd.py` wraps it
-into a restricted `ET_DYN` ELF64 image. This is **not** a full standard C/ELF
-software development kit; mutable globals, relocations, dynamically loaded
-libraries and ordinary Linux or Windows programs are unsupported.
+The linker creates a relocation-free native binary, and `tools/mkinitrd.py`
+wraps it as `ET_DYN` ELF64 with a bounded executable segment plus separate
+zero-initialized writable pages for native `.bss`. This keeps W^X rather
+than putting application state in writable executable memory. Initialized
+mutable data, dynamic relocations, shared libraries and ordinary Linux/Windows
+programs remain unsupported. **Actual VM execution of the new layout still
+requires confirmation.**
 
 ## Security and compatibility boundaries
 

@@ -4,7 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
-from mkinitrd import elf_from_flat, pack_archive
+from mkinitrd import elf_from_flat, elf_from_native_flat, pack_archive
 
 
 class BuilderTests(unittest.TestCase):
@@ -14,6 +14,14 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(elf[16:18], "little"), 3)
         self.assertEqual(int.from_bytes(elf[24:32], "little"), 0x100000)
         self.assertEqual(elf[120:], b"\x0f\x0b")
+
+    def test_native_wx_segments(self):
+        image = elf_from_native_flat(bytes(6500))
+        self.assertEqual(int.from_bytes(image[56:58],"little"),2)
+        self.assertEqual(int.from_bytes(image[68:72],"little"),5)
+        self.assertEqual(int.from_bytes(image[124:128],"little"),6)
+        self.assertEqual(int.from_bytes(image[136:144],"little"),0x102000)
+        self.assertEqual(len(image),176+6500)
 
     def test_archive_sort_order(self):
         blob = pack_archive([("bin/z", b"ZZ"), ("bin/a", b"AA")])

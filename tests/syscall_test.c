@@ -1,4 +1,6 @@
 #include "user/syscall.h"
+#include "user/wm_display.h"
+#include "user/capipc.h"
 #include "gui/native.h"
 #include "mm/address_space.h"
 #include <string.h>
@@ -11,7 +13,7 @@ static uint64_t exit_status;
 static char emitted;
 static address_space_t mock_space = { .cr3 = 4096 };
 static char output[128];
-static const char mock_user_memory[64] = "Hello from user memory";
+static char mock_user_memory[64] = "Hello from user memory";
 static size_t output_len;
 const address_space_t *userspace_current_space(void) { return active ? &mock_space : NULL; }
 bool aspace_range_valid(const address_space_t *s, uint64_t ptr, size_t len, bool writable) {
@@ -126,6 +128,50 @@ int main(void) {
     f.rsi=1000;f.rdx=65;
     r=user_syscall_dispatch(&f);
     assert(!r.exit && r.result==(uint64_t)-OPENXP_EINVAL);
+    /* Only an accepted channel owned by the authorized window server may
+     * move/focus/close a connected client's *actual* native window. */
+    f.rax=OPENXP_SYS_WM_DISPLAY;f.rdi=0;f.rsi=1000;
+    f.rdx=sizeof(openxp_wm_display_cmd_t);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
+    /* Untrusted apps cannot replace the desktop input policy or frame. */
+    for(uint64_t forbidden=OPENXP_SYS_SHELL_EVENT;
+        forbidden<=OPENXP_SYS_SHELL_WINDOW;++forbidden){
+        f.rax=forbidden;
+        r=user_syscall_dispatch(&f);
+        assert(!r.exit && r.result==(uint64_t)-OPENXP_EPERM);
+    }
+    f.rax=OPENXP_SYS_WM_DISPLAY;
+    capipc_init();
+    assert(capipc_grant_server(17) && capipc_listen(17)==CAPIPC_OK);
+    uint64_t client_handle=0,server_handle=0;
+    assert(capipc_connect(18,&client_handle)==CAPIPC_OK);
+    assert(capipc_accept(17,&server_handle)==CAPIPC_OK);
+    assert(native_open(18,"Client",6));
+    openxp_wm_display_cmd_t cmd={OPENXP_WM_SET_RECT,90,60,240,180};
+    memcpy(mock_user_memory,&cmd,sizeof(cmd));
+    f.rdi=client_handle;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rdi=server_handle;f.rdx=19;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rdx=sizeof(cmd);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0 && native_snapshot_slot(1).wm_x==90 &&
+           native_snapshot_slot(1).wm_y==60);
+    cmd.action=OPENXP_WM_RAISE;
+    memcpy(mock_user_memory,&cmd,sizeof(cmd));
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0 && native_snapshot_slot(1).wm_focus_serial);
+    assert(native_snapshot_slot(0).wm_geometry_serial==0);
+    cmd.action=OPENXP_WM_REQUEST_CLOSE;
+    memcpy(mock_user_memory,&cmd,sizeof(cmd));
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0 && native_next_event(18)==NATIVE_EVENT_CLOSE);
+    assert(capipc_close(18,client_handle)==CAPIPC_OK);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
     f.rax = OPENXP_SYS_EXIT;
     f.rdi = 77;
     r = user_syscall_dispatch(&f);

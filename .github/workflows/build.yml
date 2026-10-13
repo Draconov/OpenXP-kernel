@@ -24,6 +24,8 @@ jobs:
         run: make smoke-native
       - name: Preemptible Ring 3 GUI_WAIT and timer wake-up test
         run: make smoke-native-wait
+      - name: Ring 3 desktop shell and compositor service boot test
+        run: make smoke-shell
       - name: Deep diagnostic boot self-tests
         run: make smoke-deep
       - name: CPU exception integration test

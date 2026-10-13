@@ -70,6 +70,24 @@ int main(void){
     /* The cursor must be movable without repainting or damaging wallpaper. */
     static desktop_t fast;
     desktop_init(&fast,&f,(shell_services_t){.run=launch,.read_text=read_file});
+    native_reset();
+    assert(native_open(701,"Window Client",13));
+    desktop_native_show(&fast,0,true);
+    assert(native_wm_manage(701,1,33,47,270,180));
+    native_window_t service_window=native_snapshot_slot(0);
+    desktop_native_sync(&fast,0,&service_window);
+    assert(fast.windows[DESKTOP_NATIVE].x==33 && fast.windows[DESKTOP_NATIVE].y==47);
+    assert(fast.windows[DESKTOP_NATIVE].w==270 && fast.windows[DESKTOP_NATIVE].h==180);
+    assert(native_wm_manage(701,2,0,0,0,0));
+    service_window=native_snapshot_slot(0);
+    desktop_native_sync(&fast,0,&service_window);
+    assert(desktop_top_window(&fast)==DESKTOP_NATIVE);
+    /* Sync is idempotent: userspace cannot indefinitely steal focus. */
+    desktop_native_sync(&fast,0,&service_window);
+    native_owner_exit(701);
+    desktop_native_show(&fast,0,false);
+    desktop_native_sync(&fast,0,&(native_window_t){0});
+    assert(fast.wm_seen_geometry[0]==0 && fast.wm_seen_focus[0]==0);
     fast.mouse_x=400;fast.mouse_y=400;
     desktop_draw(&fast);
     uint32_t untouched=fast.cursor_background[0];

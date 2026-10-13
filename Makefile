@@ -8,13 +8,13 @@ LIMINE_BRANCH ?= v10.x-binary
 EXTRA_CFLAGS ?=
 CFLAGS := -target x86_64-unknown-none-elf -std=c11 -O2 -g -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mcmodel=kernel -Wall -Wextra -Werror -Ikernel -MMD -MP $(EXTRA_CFLAGS)
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T kernel/linker.ld
-C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/arch/x86_64/rtc.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/persist.c kernel/drivers/ata_ide.c kernel/drivers/pci.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/gui/native.c kernel/user/userspace.c kernel/user/process.c kernel/user/capipc.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
+C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/arch/x86_64/rtc.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/persist.c kernel/drivers/ata_ide.c kernel/drivers/pci.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/user/userspace.c kernel/user/process.c kernel/user/capipc.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
 ASM_SOURCES := kernel/arch/x86_64/isr.S kernel/arch/x86_64/irq.S kernel/sched/switch.S kernel/user/entry.S kernel/user/demo.S kernel/fs/initrd_data.S
 OBJECTS := $(patsubst kernel/%.c,$(BUILD)/%.o,$(C_SOURCES)) $(patsubst kernel/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
 -include $(OBJECTS:.o=.d)
 ISO := $(BUILD)/openxp.iso
 
-.PHONY: test-capipc test-capipc-sanitize smoke-window-ipc kernel-storage iso-storage run-storage smoke-native smoke-native-wait smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
+.PHONY: smoke-shell test-shell-bridge test-shell-bridge-sanitize test-window-protocol test-window-protocol-sanitize test-capipc test-capipc-sanitize smoke-window-ipc kernel-storage iso-storage run-storage smoke-native smoke-native-wait smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
 all: iso
 kernel: $(BUILD)/openxp.elf
 $(BUILD)/%.o: kernel/%.c
@@ -32,15 +32,22 @@ NATIVE_APPS := calculator clock notepad probe waitprobe canvas windowd winclient
 NATIVE_BINS := $(addprefix $(BUILD)/apps/,$(addsuffix .bin,$(NATIVE_APPS)))
 $(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -fno-pic -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/native_runtime.o: apps/native/runtime.c
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -fno-pic -mno-red-zone -Wall -Wextra -Werror -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/native_start.o: apps/native/start.S
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -c $< -o $@
 $(BUILD)/apps/%.bin: $(BUILD)/apps/%.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o apps/native/app.ld
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $< $(BUILD)/apps/native_runtime.o -o $@
+$(BUILD)/apps/windowd.native.o $(BUILD)/apps/winclient.native.o: apps/native/wm_protocol.h
+$(BUILD)/apps/windowd.native.o: kernel/user/wm_display.h
+$(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o apps/native/app.ld
+	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o -o $@
 $(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) tools/mkinitrd.py
 	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS)
 $(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
@@ -81,6 +88,8 @@ smoke-window-ipc:
 smoke-native-wait:
 	$(MAKE) BUILD=build/native-wait EXTRA_CFLAGS=-DOPENXP_NATIVE_WAIT_SELFTEST iso
 	bash scripts/smoke.sh build/native-wait/openxp.iso OPENXP_NATIVE_WAIT_OK
+smoke-shell: iso
+	bash scripts/smoke.sh $(ISO) OPENXP_RING3_SHELL_READY
 smoke-deep:
 	$(MAKE) BUILD=build/deep EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
 	bash scripts/smoke.sh build/deep/openxp.iso OPENXP_DEEP_OK
@@ -115,6 +124,16 @@ smoke-guard:
 	$(MAKE) BUILD=build/guard EXTRA_CFLAGS="-DOPENXP_DEEP_SELFTEST -DOPENXP_GUARD_SELFTEST" iso
 	bash scripts/smoke.sh build/guard/openxp.iso OPENXP_GUARD_OK
 
+test-shell-bridge:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel tests/shell_bridge_test.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_test
+	build/tests/shell_bridge_test
+
+test-shell-bridge-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel tests/shell_bridge_test.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_sanitized
+	build/tests/shell_bridge_sanitized
+
 test-capipc:
 	@mkdir -p build/tests
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/capipc_test.c kernel/user/capipc.c -o build/tests/capipc_test
@@ -125,7 +144,21 @@ test-capipc-sanitize:
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/capipc_test.c kernel/user/capipc.c -o build/tests/capipc_sanitized
 	build/tests/capipc_sanitized
 
-test-unit: test-desktop test-capipc $(BUILD)/initrd.img
+test-window-protocol:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/wm_protocol_test.c apps/native/wm_protocol.c -o build/tests/wm_protocol_test
+	build/tests/wm_protocol_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_test
+	build/tests/wm_capipc_test
+
+test-window-protocol-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/wm_protocol_test.c apps/native/wm_protocol.c -o build/tests/wm_protocol_sanitized
+	build/tests/wm_protocol_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
+	build/tests/wm_capipc_sanitized
+
+test-unit: test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
 	build/tests/native_wait_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
@@ -147,7 +180,7 @@ test-unit: test-desktop test-capipc $(BUILD)/initrd.img
 	build/tests/initrd_image_test $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_test
 	build/tests/process_manager_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/capipc.c kernel/gui/native.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_test
 	build/tests/syscall_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
 	build/tests/process_test
@@ -178,7 +211,7 @@ test-unit: test-desktop test-capipc $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
 	build/tests/sync_test
 
-test-sanitize: test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
+test-sanitize: test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
 	build/tests/native_wait_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
@@ -197,7 +230,7 @@ test-sanitize: test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
 	build/tests/initrd_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_sanitized
 	build/tests/process_manager_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/capipc.c kernel/gui/native.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_sanitized
 	build/tests/syscall_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
 	build/tests/process_sanitized

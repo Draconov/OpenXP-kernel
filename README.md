@@ -44,8 +44,18 @@ For headless boot checks:
 make smoke          # Desktop boot markers over serial
 make smoke-deep     # Additional kernel and user-mode diagnostics
 make smoke-native   # Native GUI/RAM ABI probe in Ring 3
-make smoke-window-ipc # Optional two-process IPC test in QEMU
+make smoke-window-ipc # Ring 3 window service and compositor bridge test
+make smoke-shell      # Confirm the Ring 3 desktop/taskbar policy service starts
 ```
+
+The trusted `bin/windowd` Ring 3 process now starts automatically on normal
+boot, owns Start-menu/taskbar drawing commands, global keyboard shortcuts,
+focus policy and IPC window requests. The kernel performs validated framebuffer
+composition and retains the legacy desktop as an automatic fallback if the
+service exits or stops refreshing its frame. **Legacy apps, desktop icons and
+window drawing still run in Ring 0.** See [Ring 3 Shell](docs/RING3-SHELL.md),
+[IPC](docs/IPC.md) and the [Roadmap](docs/ROADMAP.md). The new mode needs real
+QEMU/VirtualBox testing before it should be considered reliable.
 
 GitHub Actions runs the build and tests and uploads available kernel/ISO build
 artifacts. An uploaded artifact is **not** a guarantee that all tests passed.
@@ -129,6 +139,11 @@ pixel surfaces instead of sharing the framebuffer or living inside the
 kernel. The original legacy app windows remain for compatibility.
 Actual concurrent Ring 3 GUI behavior must still be verified in a VM.
 See [Native applications](docs/NATIVE-APPS.md) for the developer ABI.
+
+**Window-service experiment:** `windowd` starts automatically at normal boot.
+Use `RUN BIN/WINCLIENT` to exercise IPC-managed native window creation,
+movement, focus and closure. The kernel remains the final renderer and the
+legacy desktop is the fallback. See [IPC](docs/IPC.md).
 
 ## Explore the desktop
 
@@ -223,13 +238,21 @@ status see [Native applications](docs/NATIVE-APPS.md).
 
 OpenXP does **not** support Windows programs or drivers.
 
-## Experimental native window service
+## Native desktop shell
 
-OpenXP now includes two separate Ring 3 example programs using copied-message,
-process-owned IPC handles. Open Terminal and run `RUN BIN/WINDOWD` followed by
-`RUN BIN/WINCLIENT` to demonstrate a request/response exchange. This does
-**not** move the existing desktop or compositor out of the kernel. For details
-and verification limits, see [Process IPC](docs/IPC.md).
+The boot-time Ring 3 `windowd` service controls the Start-menu and taskbar
+layout and global focus/shortcut policy through bounded, kernel-validated
+commands. It does not have unrestricted framebuffer access. Legacy applications
+and window painting remain in Ring 0; the kernel restores its original shell
+if the service stops responding. The new integration test is `make smoke-shell`.
+See [Ring 3 Shell](docs/RING3-SHELL.md).
+
+## Native window IPC
+
+The same boot-time `windowd` service also accepts native application IPC clients.
+`RUN BIN/WINCLIENT` demonstrates its window-management protocol, and
+`make smoke-window-ipc` checks the diagnostic two-client path under QEMU.
+See [Process IPC](docs/IPC.md) for security and verification limits.
 
 ## Documentation
 

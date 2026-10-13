@@ -23,6 +23,26 @@ def elf_from_flat(code: bytes) -> bytes:
                        len(code), len(code), 1)
     return header + phdr + code
 
+def elf_from_native_flat(code: bytes) -> bytes:
+    """Relocation-free native image with separate RX code and zero-filled RW data.
+
+    Native linker places .bss on the first page after the flat code. Reserving
+    32 KiB provides bounded writable storage without violating W^X. This is
+    an interim format; future programs should use proper multi-segment ELF.
+    """
+    if not 0 < len(code) <= 16384:
+        raise ValueError("native image must have 1..16384 bytes of PIC code")
+    ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
+    header = struct.pack("<16sHHIQQQIHHHHHH", ident, 3, 62, 1,
+                         BASE, 64, 0, 0, 64, 56, 2, 0, 0, 0)
+    first = struct.pack("<IIQQQQQQ", 1, 5, 176, BASE, 0,
+                        len(code), len(code), 1)
+    writable = BASE + ((len(code) + 4095) & ~4095)
+    second = struct.pack("<IIQQQQQQ", 1, 6, 176 + len(code), writable, 0,
+                         0, 32768, 1)
+    return header + first + second + code
+
+
 def pack_archive(entries: list[tuple[str, bytes]]) -> bytes:
     if not 1 <= len(entries) <= 16:
         raise ValueError("archive needs 1..16 files")
@@ -63,7 +83,7 @@ def main() -> None:
                 b"Launch programs with RUN BIN/HELLO.\n"
                 b"Mouse and keyboard use legacy PS/2.\n")]
     for app in args.native:
-        entries.append(("bin/" + app.stem, elf_from_flat(app.read_bytes())))
+        entries.append(("bin/" + app.stem, elf_from_native_flat(app.read_bytes())))
     args.output.write_bytes(pack_archive(entries))
 
 if __name__ == "__main__":

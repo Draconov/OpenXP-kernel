@@ -21,8 +21,15 @@ static void verify_file(const char *path) {
     assert(data[4] == 2 && data[5] == 1 && le16(data + 16) == 3);
     assert(le16(data + 18) == 62);
     assert(le64(data + 24) == 0x100000 && le64(data + 32) == 64);
-    assert(le64(data + 72) == 120 && le64(data + 80) == 0x100000);
-    assert(le64(data + 96) == size - 120);
+    size_t first_offset = le16(data + 56) == 2 ? 176u : 120u;
+    assert(le64(data + 72) == first_offset && le64(data + 80) == 0x100000);
+    assert(le64(data + 96) == size - first_offset);
+    if(first_offset == 176u){
+        /* The native app's writable zero-initialized pages are isolated from
+         * executable text. Two segments: RX, RW. */
+        assert((data[68] & 7u) == 5u);
+        assert((data[124] & 7u) == 6u);
+    }
 }
 int main(int argc, char **argv) {
     assert(argc == 2);
