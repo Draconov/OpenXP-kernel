@@ -26,6 +26,12 @@ jobs:
         run: make smoke-native-wait
       - name: Ring 3 desktop shell and compositor service boot test
         run: make smoke-shell
+      - name: Verify windowd submits a Ring 3 composition plan
+        run: make smoke-compositor
+      - name: Verify both Ring 3 rasterized desktop layers are published
+        run: make smoke-raster
+      - name: Compose native Ring 3 window surfaces in userspace (QEMU)
+        run: make smoke-native-compose
       - name: Deep diagnostic boot self-tests
         run: make smoke-deep
       - name: CPU exception integration test

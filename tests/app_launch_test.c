@@ -16,6 +16,12 @@ int main(void){
     assert(app_launch_take(out,sizeof out));
     assert(!strcmp(out,"bin/paint"));
     assert(!app_launch_take(out,sizeof out));
+    assert(app_launch_allowed("system apps/notepad.exe"));
+    assert(app_launch_allowed("windows/system32/notepad.exe"));
+    assert(!app_launch_allowed("windows/system32/evil.exe"));
+    assert(app_launch_submit("system apps/notepad.exe"));
+    assert(app_launch_take(out,sizeof out));
+    assert(!strcmp(out,"bin/notepad"));
     assert(app_launch_submit("bin/wordpad"));
     app_launch_reset();assert(!app_launch_take(out,sizeof out));
     assert(app_launch_submit("bin/filemanager"));

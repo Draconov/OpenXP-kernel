@@ -2,6 +2,7 @@
 /* Small Ring 3 terminal. File writes are confined by the kernel to HOME. */
 static char input[55],lines[7][55];
 static unsigned used,row,listing_offset;
+static char cwd[96];
 static app_file_request_t req;
 static int same(const char *a,const char *b){
     while(*a&&*b){char x=*a++,y=*b++;
@@ -24,10 +25,43 @@ static void split(char *s,char **left,char **right){
     s=word(s);*left=s;while(*s && *s!=' ')++s;
     if(*s){*s++=0;*right=word(s);}else *right=s;
 }
+static int absolute(const char *p){
+    return starts(p,"home/")||starts(p,"bin/")||starts(p,"docs/")||
+        starts(p,"windows/")||starts(p,"program files/")||starts(p,"system apps/")||
+        starts(p,"my documents/")||starts(p,"documents and settings/");
+}
+static void resolve(const char *from,char *out,unsigned cap){
+    unsigned n=0;out[0]=0;
+    if(starts(from,"c:"))from+=2;
+    if(*from=='/' || *from=='\\')++from;
+    else if(!absolute(from))for(unsigned i=0;cwd[i]&&n+1<cap;++i)out[n++]=cwd[i];
+    while(*from && n+1<cap){char c=*from++;
+        if(c>='A'&&c<='Z')c+=32;
+        out[n++]=c=='\\'?'/':c;
+    }out[n]=0;
+}
+static void cd(const char *dest){
+    if(same(dest,"..")){
+        unsigned n=0;while(cwd[n])++n;
+        if(n&&cwd[n-1]=='/')--n;
+        while(n&&cwd[n-1]!='/')--n;
+        cwd[n]=0;listing_offset=0;print("PARENT FOLDER");return;
+    }
+    if(same(dest,"\\")||same(dest,"/")||same(dest,"c:\\")){
+        cwd[0]=0;listing_offset=0;print("C:\\");return;
+    }
+    char path[96];resolve(dest,path,sizeof path);
+    req=(app_file_request_t){0};oxp_copy(req.path,path,sizeof req.path);
+    if(oxp_file(APP_FS_KIND,&req)!=3){print("FOLDER NOT FOUND");return;}
+    unsigned n=0;while(path[n]&&n+2<sizeof cwd){cwd[n]=path[n];++n;}
+    if(path[n]){print("PATH TOO LONG");return;}
+    cwd[n++]='/';cwd[n]=0;listing_offset=0;print("DIRECTORY CHANGED");
+}
 static void list(void){
     unsigned displayed=0;
     for(unsigned i=listing_offset;i<listing_offset+5;++i){
-        req=(app_file_request_t){0};req.index=i;
+        req=(app_file_request_t){0};req.index=i;req.dest[0]='D';
+        oxp_copy(req.path,cwd,sizeof req.path);
         if(oxp_file(APP_FS_LIST,&req))break;
         print(req.path);++displayed;
     }
@@ -35,7 +69,7 @@ static void list(void){
     else {listing_offset=0;if(!displayed)print("END OF FILE LIST");}
 }
 static void read_file(const char *name){
-    req=(app_file_request_t){0};oxp_copy(req.path,name,sizeof req.path);
+    req=(app_file_request_t){0};resolve(name,req.path,sizeof req.path);
     if(oxp_file(APP_FS_READ,&req)){print("NO FILE OR TOO LARGE");return;}
     char b[55];unsigned n=0;
     for(unsigned i=0;i<req.size;++i){
@@ -48,23 +82,41 @@ static void read_file(const char *name){
 static void execute(void){
     print(input);
     if(same(input,"help")){
-        print("LS CAT COPY REN DEL WRITE TOUCH");
+        print("CD DIR LS CAT COPY REN DEL WRITE TOUCH");
         print("RUN MEM UPTIME PWD ECHO CLEAR");
     }else if(same(input,"clear")||same(input,"cls")){
         row=0;for(unsigned i=0;i<7;++i)lines[i][0]=0;
     }else if(same(input,"ls")||same(input,"dir"))list();
-    else if(same(input,"pwd"))print("BOOT + HOME (RAM)");
+    else if(same(input,"pwd")){
+        char here[55]="C:\\";unsigned n=3;
+        for(unsigned i=0;cwd[i]&&n+1<sizeof here;++i)
+            here[n++]=cwd[i]=='/'?'\\':cwd[i];
+        here[n]=0;print(here);
+    }
+    else if(starts(input,"cd "))cd(word(input+3));
     else if(same(input,"mem"))number("FREE PAGES ",oxp_call(26,0,0));
     else if(same(input,"uptime"))number("UPTIME SEC ",oxp_ticks()/100);
     else if(starts(input,"echo "))print(input+5);
     else if(starts(input,"cat ")||starts(input,"type "))
         read_file(word(input+(starts(input,"cat ")?4:5)));
     else if(starts(input,"run ")){
-        char path[48]="bin/";char *name=word(input+4);
-        if(starts(name,"bin/"))oxp_copy(path,name,sizeof path);
-        else {unsigned i=0;while(name[i] && i<sizeof(path)-5){
-            char c=name[i];if(c>='A'&&c<='Z')c+=32;path[i+4]=c;++i;}
-            path[i+4]=0;}
+        char path[96];char *name=word(input+4);
+        if(absolute(name)||starts(name,"c:")||starts(name,"/")){
+            resolve(name,path,sizeof path);
+        }else{
+            unsigned n=0;while(name[n])++n;
+            if(n>4 && same(name+n-4,".exe")){
+                oxp_copy(path,"system apps/",sizeof path);
+                unsigned j=12,i=0;
+                while(name[i]&&j+1<sizeof path){path[j++]=name[i++];}
+                path[j]=0;
+            }else{
+                oxp_copy(path,"bin/",sizeof path);
+                unsigned j=4,i=0;
+                while(name[i]&&j+1<sizeof path){path[j++]=name[i++];}
+                path[j]=0;
+            }
+        }
         print(oxp_launch(path)==0?"LAUNCH QUEUED":"UNKNOWN/BUSY");
     }else if(starts(input,"copy ")||starts(input,"ren ")){
         unsigned copy=starts(input,"copy ");
@@ -93,12 +145,16 @@ static void execute(void){
     input[0]=0;used=0;
 }
 static void render(void){
+    unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
     oxp_draw_cmd_t shapes[]={
-        {OXP_DRAW_CLEAR,0,0,0,0,0x101d30},{OXP_DRAW_FILL,0,0,320,22,0x264c7d}};
+        {OXP_DRAW_CLEAR,0,0,0,0,0x101d30},{OXP_DRAW_FILL,0,0,w,22,0x264c7d}};
     oxp_draw(shapes,2);oxp_label(9,7,"OPENXP TERMINAL - NATIVE",1,0xffffff);
-    unsigned count=row<7?row:7;
+    unsigned prompt=h>18u?h-18u:0u;
+    unsigned rows=prompt>30u?(prompt-30u)/17u:0u;
+    if(rows>7u)rows=7u;
+    unsigned count=row<rows?row:rows;
     for(unsigned i=0;i<count;++i)oxp_label(9,30+i*17,lines[(row-count+i)%7],1,0xaddbb3);
-    oxp_label(9,160,">",1,0x82e7b3);oxp_label(20,160,input,1,0xd6f4db);
+    if(h>15u){oxp_label(9,prompt,">",1,0x82e7b3);oxp_label(20,prompt,input,1,0xd6f4db);}
 }
 void oxp_main(void){
     if(oxp_open("Terminal - native ELF64"))oxp_exit(1);

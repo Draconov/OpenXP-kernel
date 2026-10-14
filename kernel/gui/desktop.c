@@ -2,6 +2,7 @@
 #include "fs/initrd.h"
 #include "fs/ramfs.h"
 #include "gui/native.h"
+#include "gui/native_viewport.h"
 #ifndef OPENXP_WM_HOST_TEST
 #include "gui/shell_bridge.h"
 #endif
@@ -106,7 +107,14 @@ int desktop_top_window(const desktop_t *d) {
 }
 static void open_window(desktop_t *d,int which) {
     if(which<0||which>=DESKTOP_WINDOWS)return;
-    d->windows[which].open=true;d->windows[which].minimized=false;
+    desktop_window_t *w=&d->windows[which];
+    /* Reopening a closed maximized window starts at its old normal size. */
+    if(!w->open && w->maximized){
+        w->x=w->restore_x;w->y=w->restore_y;
+        w->w=w->restore_w;w->h=w->restore_h;
+        w->maximized=false;
+    }
+    w->open=true;w->minimized=false;
     if(which==DESKTOP_TERMINAL)d->shell.visible=true;
     d->showing_desktop=false;
     focus(d,which);
@@ -186,6 +194,56 @@ bool desktop_shell_move(desktop_t *d,uint32_t index,uint32_t x,uint32_t y){
        (uint32_t)w->h+42u>(uint32_t)d->surface->height-y)return false;
     w->x=(int)x;w->y=(int)y;return true;
 }
+/* User-driven resize, distinct from restoring/maximizing: never modify the
+ * saved normal rectangle until the user explicitly maximizes. Validation
+ * lives in Ring 0 even when windowd requests the change. */
+bool desktop_shell_resize(desktop_t *d,uint32_t index,uint32_t width,uint32_t height){
+    if(!d || !d->surface || index>=DESKTOP_WINDOWS)return false;
+    desktop_window_t *w=&d->windows[index];
+    if(!w->open || w->minimized || w->maximized)return false;
+    /* Legacy UI uses several fixed controls; keep enough area for them.
+     * Ring 3 apps use a virtual canvas and safely support smaller windows. */
+    uint32_t min_width=index>=DESKTOP_NATIVE?240u:340u;
+    uint32_t min_height=index>=DESKTOP_NATIVE?190u:280u;
+    if(index==DESKTOP_CALCULATOR){min_width=270u;min_height=310u;}
+    if(index==DESKTOP_RUN){min_width=340u;min_height=190u;}
+    if(index==DESKTOP_ABOUT){min_width=340u;min_height=235u;}
+    if(width<min_width || height<min_height ||
+       (uint32_t)w->x>(uint32_t)d->surface->width ||
+       (uint32_t)w->y>(uint32_t)d->surface->height-42u ||
+       width>(uint32_t)d->surface->width-(uint32_t)w->x ||
+       height>(uint32_t)d->surface->height-42u-(uint32_t)w->y)return false;
+    w->w=(int)width;w->h=(int)height;
+    if(index>=DESKTOP_NATIVE)native_set_window_size(index-DESKTOP_NATIVE,width,height);
+    return true;
+}
+/* Maximize to the usable desktop, keeping the taskbar accessible.
+ * Remember each window's previous geometry for lossless restoration.
+ * Native fixed-resolution canvases are composited at a matching aspect-
+ * preserving scale; their input is translated through the same viewport. */
+bool desktop_shell_maximize(desktop_t *d,uint32_t index){
+    if(!d || !d->surface || index>=DESKTOP_WINDOWS)return false;
+    desktop_window_t *w=&d->windows[index];
+    if(!w->open)return false;
+    if(w->maximized){
+        w->x=w->restore_x;w->y=w->restore_y;
+        w->w=w->restore_w;w->h=w->restore_h;
+        w->maximized=false;
+    }else{
+        if(d->surface->width<120 || d->surface->height<122)return false;
+        w->restore_x=w->x;w->restore_y=w->y;
+        w->restore_w=w->w;w->restore_h=w->h;
+        w->x=0;w->y=0;w->w=d->surface->width;
+        w->h=d->surface->height-42;
+        w->maximized=true;
+    }
+    w->minimized=false;
+    d->dragging=false;
+    d->resizing=false;
+    focus(d,(int)index);
+    if(index>=DESKTOP_NATIVE)native_set_window_size(index-DESKTOP_NATIVE,(unsigned)w->w,(unsigned)w->h);
+    return true;
+}
 const char *desktop_shell_title(desktop_t *d,uint32_t index){
     if(!d||index>=DESKTOP_WINDOWS)return "";
     if(index>=DESKTOP_NATIVE){
@@ -197,23 +255,23 @@ const char *desktop_shell_title(desktop_t *d,uint32_t index){
 }
 void desktop_init(desktop_t *d,fb_surface_t *s,shell_services_t services) {
     *d=(desktop_t){0};d->surface=s;
-    d->windows[0]=(desktop_window_t){70,90,s->width>810?670:s->width-110,s->height>610?370:s->height-185,true,false};
-    d->windows[1]=(desktop_window_t){110,100,s->width>810?540:s->width-130,s->height>610?330:s->height-185,false,false};
-    d->windows[2]=(desktop_window_t){160,105,s->width>810?440:s->width-180,s->height>450?235:s->height-170,true,false};
-    d->windows[3]=(desktop_window_t){130,130,500,330,false,false};
-    d->windows[4]=(desktop_window_t){230,150,270,310,false,false};
-    d->windows[5]=(desktop_window_t){120,58,380,356,false,false};
-    d->windows[6]=(desktop_window_t){164,105,400,344,false,false};
-    d->windows[7]=(desktop_window_t){198,100,368,285,false,false};
-    d->windows[8]=(desktop_window_t){270,64,296,353,false,false};
-    d->windows[9]=(desktop_window_t){185,118,360,265,false,false};
-    d->windows[10]=(desktop_window_t){155,90,405,347,false,false};
-    d->windows[11]=(desktop_window_t){215,155,405,190,false,false};
-    d->windows[12]=(desktop_window_t){125,92,520,380,false,false};
-    d->windows[13]=(desktop_window_t){225,110,410,402,false,false};
-    d->windows[14]=(desktop_window_t){230,145,470,300,false,false};
-    d->windows[15]=(desktop_window_t){265,175,470,300,false,false};
-    d->windows[16]=(desktop_window_t){175,120,470,300,false,false};
+    d->windows[0]=(desktop_window_t){70,90,s->width>810?670:s->width-110,s->height>610?370:s->height-185,true,false,false,0,0,0,0};
+    d->windows[1]=(desktop_window_t){110,100,s->width>810?540:s->width-130,s->height>610?330:s->height-185,false,false,false,0,0,0,0};
+    d->windows[2]=(desktop_window_t){160,105,s->width>810?440:s->width-180,s->height>450?235:s->height-170,true,false,false,0,0,0,0};
+    d->windows[3]=(desktop_window_t){130,130,500,330,false,false,false,0,0,0,0};
+    d->windows[4]=(desktop_window_t){230,150,270,310,false,false,false,0,0,0,0};
+    d->windows[5]=(desktop_window_t){120,58,380,356,false,false,false,0,0,0,0};
+    d->windows[6]=(desktop_window_t){164,105,400,344,false,false,false,0,0,0,0};
+    d->windows[7]=(desktop_window_t){198,100,368,285,false,false,false,0,0,0,0};
+    d->windows[8]=(desktop_window_t){270,64,296,353,false,false,false,0,0,0,0};
+    d->windows[9]=(desktop_window_t){185,118,360,265,false,false,false,0,0,0,0};
+    d->windows[10]=(desktop_window_t){155,90,405,347,false,false,false,0,0,0,0};
+    d->windows[11]=(desktop_window_t){215,155,405,190,false,false,false,0,0,0,0};
+    d->windows[12]=(desktop_window_t){125,92,520,380,false,false,false,0,0,0,0};
+    d->windows[13]=(desktop_window_t){225,110,410,402,false,false,false,0,0,0,0};
+    d->windows[14]=(desktop_window_t){230,145,470,300,false,false,false,0,0,0,0};
+    d->windows[15]=(desktop_window_t){265,175,470,300,false,false,false,0,0,0,0};
+    d->windows[16]=(desktop_window_t){175,120,470,300,false,false,false,0,0,0,0};
     if(d->windows[3].w>s->width-25)d->windows[3].w=s->width-25;
     if(d->windows[4].w>s->width-25)d->windows[4].w=s->width-25;
     for(int i=0;i<DESKTOP_WINDOWS;++i){
@@ -695,8 +753,23 @@ unsigned desktop_calendar_weekday(unsigned year,unsigned month,unsigned day){
 void desktop_native_show(desktop_t *d,unsigned slot,bool showing) {
     if(!d||slot>=NATIVE_MAX_WINDOWS)return;
     int index=DESKTOP_NATIVE+(int)slot;
-    if(showing && !d->windows[index].open)open_window(d,index);
-    if(!showing && d->windows[index].open)d->windows[index].open=false;
+    if(showing && !d->windows[index].open){
+        d->windows[index].maximized=false;
+        open_window(d,index);
+    }
+    if(showing){
+        desktop_window_t *w=&d->windows[index];
+        native_set_window_size(slot,(unsigned)w->w,(unsigned)w->h);
+    }
+    if(!showing && d->windows[index].open){
+        desktop_window_t *w=&d->windows[index];
+        if(w->maximized){
+            w->x=w->restore_x;w->y=w->restore_y;
+            w->w=w->restore_w;w->h=w->restore_h;
+        }
+        w->open=false;
+        w->maximized=false;
+    }
 }
 void desktop_native_sync(desktop_t *d,unsigned slot,const native_window_t *native){
     if(!d||!native||slot>=NATIVE_MAX_WINDOWS)return;
@@ -715,8 +788,10 @@ void desktop_native_sync(desktop_t *d,unsigned slot,const native_window_t *nativ
            native->wm_y+native->wm_height+42u<=(unsigned)d->surface->height){
             w->x=(int)native->wm_x;w->y=(int)native->wm_y;
             w->w=(int)native->wm_width;w->h=(int)native->wm_height;
+            w->maximized=false;
         }
     }
+    native_set_window_size(slot,(unsigned)d->windows[index].w,(unsigned)d->windows[index].h);
     if(native->wm_focus_serial && native->wm_focus_serial!=d->wm_seen_focus[slot]){
         d->wm_seen_focus[slot]=native->wm_focus_serial;
         if(d->windows[index].open)open_window(d,index);
@@ -1202,11 +1277,24 @@ static void draw_window(desktop_t *d,int index,bool active) {
     native_window_t native={0};
     if(index>=DESKTOP_NATIVE)native=native_snapshot_slot((unsigned)(index-DESKTOP_NATIVE));
     const char *title=index>=DESKTOP_NATIVE && native.active?native.title:desktop_titles[index];
-    truncate_text(d,w->x+13,w->y+11,title,w->w-92,1,rgb(d,255,255,255));
+    truncate_text(d,w->x+13,w->y+11,title,w->w-115,1,rgb(d,255,255,255));
     fill(d,w->x+w->w-28,w->y+6,21,21,192,63,61);
     text(d,w->x+w->w-22,w->y+13,"X",1,255,255,255);
+    /* XP-style controls, left to right: minimize, maximize/restore, close. */
+    fill(d,w->x+w->w-80,w->y+6,21,21,79,133,203);
+    text(d,w->x+w->w-74,w->y+13,"-",1,255,255,255);
     fill(d,w->x+w->w-54,w->y+6,21,21,79,133,203);
-    text(d,w->x+w->w-48,w->y+13,"-",1,255,255,255);
+    if(w->maximized){
+        fb_outline(d->surface,w->x+w->w-47,w->y+14,9,7,rgb(d,255,255,255));
+        fb_outline(d->surface,w->x+w->w-45,w->y+11,9,7,rgb(d,255,255,255));
+    }else{
+        fb_outline(d->surface,w->x+w->w-48,w->y+12,11,10,rgb(d,255,255,255));
+    }
+    if(!w->maximized){
+        for(int n=0;n<3;++n)
+            fill(d,w->x+w->w-14+n*4,w->y+w->h-12+n*3,
+                 2,2,92,111,143);
+    }
     if(index==DESKTOP_TERMINAL)draw_terminal(d,w);
     else if(index==DESKTOP_FILES)draw_files(d,w);
     else if(index==DESKTOP_ABOUT)draw_about(d,w);
@@ -1227,15 +1315,23 @@ static void draw_window(desktop_t *d,int index,bool active) {
         if(native_has_surface(slot)) {
             /* Render from a kernel-owned, PID-checked surface, never from
              * an application pointer or a shared framebuffer mapping. */
-            uint16_t scanline[NATIVE_SURFACE_W];
-            int left=w->x+16,top=w->y+43;
-            for(unsigned y=0;y<NATIVE_SURFACE_H;++y) {
-                int py=top+(int)y;
-                if(py>=w->y+w->h-6)break;
-                if(!native_copy_surface_row(slot,y,scanline,NATIVE_SURFACE_W))break;
-                int cols=w->x+w->w-6-left;
-                if(cols>(int)NATIVE_SURFACE_W)cols=(int)NATIVE_SURFACE_W;
-                fb_blit565_row(d->surface,left,py,scanline,cols);
+            oxp_native_viewport_t v=oxp_native_viewport((unsigned)w->x,(unsigned)w->y,
+                                                        (unsigned)w->w,(unsigned)w->h);
+            uint16_t source[NATIVE_SURFACE_W],scaled[OXP_SHELL_RASTER_W];
+            if(v.w){
+                for(unsigned dy=0;dy<v.h;++dy){
+                    oxp_native_canvas_t canvas=oxp_native_canvas((unsigned)w->w,(unsigned)w->h);
+                    unsigned sy=(unsigned)((uint64_t)dy*canvas.h/v.h);
+                    if(!native_copy_surface_row(slot,sy,source,NATIVE_SURFACE_W))break;
+                    unsigned count=v.w>OXP_SHELL_RASTER_W?OXP_SHELL_RASTER_W:v.w;
+                    unsigned sx=0,remainder=0;
+                    for(unsigned dx=0;dx<count;++dx){
+                        scaled[dx]=source[sx];
+                        remainder+=canvas.w;
+                        while(remainder>=v.w){remainder-=v.w;++sx;}
+                    }
+                    fb_blit565_row(d->surface,(int)v.x,(int)(v.y+dy),scaled,(int)count);
+                }
             }
             return;
         }
@@ -1343,91 +1439,167 @@ void desktop_cursor_update(desktop_t *d) {
     cursor_restore(d);
     cursor_paint(d);
 }
-void desktop_draw(desktop_t *d) {
-    /* A complete repaint overwrites the old cursor and its underlay. */
-    d->cursor_painted=false;
-    /* Ring 3 selects the wallpaper and icon composition when its display
-       list is live. Retain the legacy renderer as a crash fallback. */
+static void compose_desktop_windows(desktop_t *d){
+    int top=desktop_top_window(d);
+#ifndef OPENXP_WM_HOST_TEST
+    uint32_t indices[DESKTOP_WINDOWS];
+    uint32_t count=0;
+    if(shell_bridge_window_order(indices,DESKTOP_WINDOWS,&count)){
+        /* The server determines ordering; the privileged kernel checks
+         * current visibility and only rasterizes kernel-owned surfaces. */
+        for(uint32_t i=0;i<count;++i){
+            unsigned index=indices[i];
+            if(index<DESKTOP_WINDOWS && d->windows[index].open &&
+               !d->windows[index].minimized)
+                /* Native windows are rasterized by windowd when its complete
+                   native-window scene is published. */
+                if(index<DESKTOP_NATIVE ||
+                   !shell_bridge_raster_ready(OXP_SHELL_LAYER_NATIVE))
+                    draw_window(d,(int)index,(int)index==top);
+        }
+        return;
+    }
+#endif
+    for(int z=0;z<DESKTOP_WINDOWS;++z)
+        draw_window(d,d->order[z],d->order[z]==top);
+}
+/* Compose a coherent desktop in ordinary RAM before presenting its pixels to
+ * the device framebuffer. Direct VGA/VirtualBox framebuffer writes during a
+ * long, multi-layer redraw expose half-rendered windows (visible flicker).
+ * Cursor motion retains its small, direct underlay update path. */
+#define DESKTOP_PRESENT_MAX_W 1024
+#define DESKTOP_PRESENT_MAX_H 768
+static uint32_t desktop_backbuffer[DESKTOP_PRESENT_MAX_W * DESKTOP_PRESENT_MAX_H];
+
+static void paint_desktop_scene(desktop_t *d) {
 #ifndef OPENXP_WM_HOST_TEST
     if(shell_bridge_active())shell_bridge_compose_background(d->surface);
     else
 #endif
     {draw_wallpaper(d);draw_icons(d);}
-    int top=desktop_top_window(d);
-    for(int z=0;z<DESKTOP_WINDOWS;++z)
-        draw_window(d,d->order[z],d->order[z]==top);
+    compose_desktop_windows(d);
 #ifndef OPENXP_WM_HOST_TEST
+    shell_bridge_compose_native(d->surface);
     if(!shell_bridge_active())
 #endif
     {draw_taskbar(d);draw_menu(d);}
 #ifndef OPENXP_WM_HOST_TEST
     shell_bridge_compose(d->surface);
 #endif
-    cursor_paint(d);
 }
-void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index) {
+static void desktop_present_region(desktop_t *d,int x,int y,int w,int h){
+    if(!d || !d->surface || !d->surface->pixels || w<=0 || h<=0)return;
+    fb_surface_t *const front=d->surface;
+    int64_t left=x,top=y,right=(int64_t)x+w,bottom=(int64_t)y+h;
+    if(left<0)left=0;
+    if(top<0)top=0;
+    if(right>front->width)right=front->width;
+    if(bottom>front->height)bottom=front->height;
+    if(left>=right || top>=bottom)return;
+
+    /* Whole-scene redraws include the cursor in the finished RAM image so
+       it cannot disappear while the display copy is taking place. */
+    bool whole=(left==0 && top==0 && right==front->width && bottom==front->height);
+    if(!whole)cursor_restore(d);
+    if(front->width<=DESKTOP_PRESENT_MAX_W &&
+       front->height<=DESKTOP_PRESENT_MAX_H &&
+       front->pitch>=front->width*4){
+        fb_surface_t back=*front;
+        back.pixels=(volatile uint8_t *)desktop_backbuffer;
+        back.pitch=front->width*4;
+        fb_clip_set(&back,(int)left,(int)top,(int)(right-left),(int)(bottom-top));
+        /* A Ring 3 commit can preempt the kernel while it is building a frame.
+           Never publish a mixed-generation scene: retry it once and otherwise
+           let the next main-loop iteration handle the newer generation. */
+        bool coherent=false;
+        for(unsigned attempt=0;attempt<2;++attempt){
+#ifndef OPENXP_WM_HOST_TEST
+            uint64_t version=shell_bridge_scene_version();
+#endif
+            d->surface=&back;
+            /* Areas omitted by a transient shell layer start from a defined
+               opaque base, never bytes left by an older window position. */
+            fb_rect(&back,(int)left,(int)top,(int)(right-left),(int)(bottom-top),
+                    fb_rgb(&back,19,49,103));
+            paint_desktop_scene(d);
+            d->surface=front;
+#ifndef OPENXP_WM_HOST_TEST
+            coherent=(version==shell_bridge_scene_version());
+#else
+            coherent=true;
+#endif
+            if(coherent)break;
+        }
+        if(coherent){
+            if(whole){
+                d->surface=&back;
+                cursor_paint(d);
+                d->surface=front;
+            }
+            /* The RAM backbuffer is a complete coherent image, but writing
+             * it wholesale to a scanout framebuffer still tears visibly in
+             * VirtualBox. Publish ONLY changed pixels. Static window areas
+             * must never be rewritten for a clock or IPC heartbeat update. */
+            (void)fb_present_changed(front,desktop_backbuffer,front->width,
+                                     (int)left,(int)top,
+                                     (int)(right-left),(int)(bottom-top));
+        }
+#ifndef OPENXP_WM_HOST_TEST
+        else shell_bridge_request_redraw();
+#endif
+    }else{
+        if(whole)cursor_restore(d);
+        /* Nonstandard framebuffer modes preserve the old bounded renderer.
+           They need their own variable-sized backbuffer in a later pass. */
+        fb_clip_set(front,(int)left,(int)top,(int)(right-left),(int)(bottom-top));
+        paint_desktop_scene(d);
+        fb_clip_clear(front);
+    }
+    if(!whole)cursor_paint(d);
+    else if(front->width>DESKTOP_PRESENT_MAX_W || front->height>DESKTOP_PRESENT_MAX_H ||
+            front->pitch<front->width*4)cursor_paint(d);
+}
+void desktop_draw(desktop_t *d){
+    if(d && d->surface)
+        desktop_present_region(d,0,0,d->surface->width,d->surface->height);
+}
+void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index){
     if(!d||!d->surface||index<0||index>=DESKTOP_WINDOWS)return;
-    desktop_window_t *w=&d->windows[index];
-    int x0=oldx<w->x?oldx:w->x;
-    int y0=oldy<w->y?oldy:w->y;
-    int x1=oldx>w->x?oldx:w->x;
-    int y1=oldy>w->y?oldy:w->y;
-    /* Include right/bottom 5px shadow and an extra pixel of border. */
-    fb_surface_t *s=d->surface;
-    cursor_restore(d);
-    fb_clip_set(s,x0-1,y0-1,x1-x0+w->w+7,y1-y0+w->h+7);
-#ifndef OPENXP_WM_HOST_TEST
-    if(shell_bridge_active())shell_bridge_compose_background(d->surface);
-    else
-#endif
-    {draw_wallpaper(d);draw_icons(d);}
-    int top=desktop_top_window(d);
-    for(int z=0;z<DESKTOP_WINDOWS;++z)
-        draw_window(d,d->order[z],d->order[z]==top);
-#ifndef OPENXP_WM_HOST_TEST
-    if(!shell_bridge_active())
-#endif
-    {draw_taskbar(d);draw_menu(d);}
-#ifndef OPENXP_WM_HOST_TEST
-    shell_bridge_compose(d->surface);
-#endif
-    fb_clip_clear(s);
-    cursor_paint(d);
+    const desktop_window_t *window=&d->windows[index];
+    int left=oldx<window->x?oldx:window->x;
+    int top=oldy<window->y?oldy:window->y;
+    int right=(oldx>window->x?oldx:window->x)+window->w+7;
+    int bottom=(oldy>window->y?oldy:window->y)+window->h+7;
+    desktop_present_region(d,left-1,top-1,right-left+1,bottom-top+1);
 }
-void desktop_redraw_taskbar(desktop_t *d) {
-    if(!d || !d->surface)return;
-    cursor_restore(d);
-    draw_taskbar(d);
+void desktop_redraw_taskbar(desktop_t *d){
 #ifndef OPENXP_WM_HOST_TEST
-    shell_bridge_compose(d->surface);
+    /* The Ring 3 service already updates its own taskbar clock. Repeating
+     * an independent Ring 0 repaint every second causes needless VRAM IO. */
+    if(shell_bridge_active())return;
 #endif
-    cursor_paint(d);
+    if(d&&d->surface)
+        desktop_present_region(d,0,d->surface->height-42,d->surface->width,42);
 }
-void desktop_redraw_active(desktop_t *d) {
+void desktop_redraw_active(desktop_t *d){
     if(!d || d->start_open)return;
     int top=desktop_top_window(d);
     if(top<0)return;
-    cursor_restore(d);
-    draw_window(d,top,true);
 #ifndef OPENXP_WM_HOST_TEST
-    shell_bridge_compose(d->surface);
+    if(top>=DESKTOP_NATIVE && shell_bridge_raster_ready(OXP_SHELL_LAYER_NATIVE))
+        return; /* windowd will publish the updated native pixels. */
 #endif
-    cursor_paint(d);
+    const desktop_window_t *w=&d->windows[top];
+    desktop_present_region(d,w->x-1,w->y-1,w->w+8,w->h+8);
 }
 void desktop_redraw_paint(desktop_t *d){
-    if(!d||!d->paint_dirty || desktop_top_window(d)!=DESKTOP_PAINT)return;
-    desktop_window_t *w=&d->windows[DESKTOP_PAINT];
-    int x=w->x+16+d->paint_min_x*2,y=w->y+96+d->paint_min_y*2;
-    int width=(d->paint_max_x-d->paint_min_x+1)*2;
-    int height=(d->paint_max_y-d->paint_min_y+1)*2;
-    cursor_restore(d);
-    fb_clip_set(d->surface,x,y,width,height);
-    draw_window(d,DESKTOP_PAINT,true);
-#ifndef OPENXP_WM_HOST_TEST
-    shell_bridge_compose(d->surface);
-#endif
-    fb_clip_clear(d->surface);
-    cursor_paint(d);
+    if(!d || !d->paint_dirty || desktop_top_window(d)!=DESKTOP_PAINT)return;
+    const desktop_window_t *w=&d->windows[DESKTOP_PAINT];
+    int x=w->x+16+(int)d->paint_min_x*2;
+    int y=w->y+96+(int)d->paint_min_y*2;
+    int width=((int)d->paint_max_x-(int)d->paint_min_x+1)*2;
+    int height=((int)d->paint_max_y-(int)d->paint_min_y+1)*2;
+    desktop_present_region(d,x,y,width,height);
     d->paint_dirty=false;
 }
 void desktop_redraw_terminal(desktop_t *d){
@@ -1471,14 +1643,33 @@ static void desktop_click(desktop_t *d,int x,int y) {
         }
         d->start_open=false;return;
     }
-    for(int z=DESKTOP_WINDOWS-1;z>=0;--z) {
-        int i=d->order[z];desktop_window_t *w=&d->windows[i];
+    /* Match windowd's published stacking order when choosing caption
+       buttons; the fallback desktop uses the ordinary kernel order. */
+    uint32_t shell_order[DESKTOP_WINDOWS];
+    uint32_t shell_count=0;
+    bool use_shell_order=false;
+#ifndef OPENXP_WM_HOST_TEST
+    use_shell_order=shell_bridge_window_order(shell_order,DESKTOP_WINDOWS,&shell_count);
+#endif
+    int count=use_shell_order?(int)shell_count:DESKTOP_WINDOWS;
+    for(int z=count-1;z>=0;--z) {
+        int i=use_shell_order?(int)shell_order[z]:d->order[z];
+        desktop_window_t *w=&d->windows[i];
         if(!w->open||w->minimized||!inside(x,y,w->x,w->y,w->w,w->h))continue;
         if(y<w->y+33 && x>=w->x+w->w-31){
             if(i>=DESKTOP_NATIVE)native_close_request_slot((unsigned)(i-DESKTOP_NATIVE));
             else {w->open=false;}
             return;}
-        if(y<w->y+33 && x>=w->x+w->w-57){w->minimized=true;return;}
+        if(y<w->y+33 && x>=w->x+w->w-57){
+            (void)desktop_shell_maximize(d,(uint32_t)i);return;
+        }
+        if(y<w->y+33 && x>=w->x+w->w-83){w->minimized=true;return;}
+        if(!w->maximized && x>=w->x+w->w-18 && y>=w->y+w->h-18){
+            d->resizing=true;d->resize_window=i;
+            d->last_x=x;d->last_y=y;
+            focus(d,i);
+            return;
+        }
 #ifndef OPENXP_WM_HOST_TEST
         if(shell_bridge_active())shell_bridge_notify_focus((uint32_t)i);
         else focus(d,i);
@@ -1488,6 +1679,8 @@ static void desktop_click(desktop_t *d,int x,int y) {
         if(i>=DESKTOP_NATIVE){
             unsigned xlocal=(unsigned)(x-w->x);
             unsigned ylocal=(unsigned)(y-w->y);
+            oxp_native_pointer_to_canvas(xlocal,ylocal,(unsigned)w->w,
+                                         (unsigned)w->h,&xlocal,&ylocal);
             native_push_event_slot((unsigned)(i-DESKTOP_NATIVE),
                 NATIVE_EVENT_CLICK | ((xlocal&1023u)<<10) | (ylocal&1023u));
             return;
@@ -1588,7 +1781,7 @@ static void desktop_click(desktop_t *d,int x,int y) {
                 calculator_press(d,keys[row][col]);
             return;
         }
-        if(y<w->y+33){d->dragging=true;d->drag_window=i;d->last_x=x;d->last_y=y;}
+        if(y<w->y+33 && !w->maximized){d->dragging=true;d->drag_window=i;d->last_x=x;d->last_y=y;}
         return;
     }
     if(inside(x,y,12,25,104,65))open_window(d,DESKTOP_FILES);
@@ -1610,6 +1803,14 @@ void desktop_mouse(desktop_t *d,int x,int y,bool down) {
             d->paint_last_x=px;d->paint_last_y=py;
         } else d->paint_active=false;
     }
+    else if(down && d->resizing){
+        desktop_window_t *w=&d->windows[d->resize_window];
+        int nw=w->w+x-d->last_x,nh=w->h+y-d->last_y;
+        if(nw>0 && nh>0)
+            (void)desktop_shell_resize(d,(uint32_t)d->resize_window,
+                                       (uint32_t)nw,(uint32_t)nh);
+        d->last_x=x;d->last_y=y;
+    }
     else if(down && d->dragging) {
         desktop_window_t *w=&d->windows[d->drag_window];
         int nx=w->x+x-d->last_x,ny=w->y+y-d->last_y;
@@ -1619,7 +1820,7 @@ void desktop_mouse(desktop_t *d,int x,int y,bool down) {
         if(ny+w->h>d->surface->height-42)ny=d->surface->height-42-w->h;
         w->x=nx;w->y=ny;d->last_x=x;d->last_y=y;
     }
-    if(!down){d->dragging=false;d->paint_active=false;}
+    if(!down){d->dragging=false;d->resizing=false;d->paint_active=false;}
     d->mouse_down=down;
     d->mouse_x=x;d->mouse_y=y;
 }
@@ -1629,9 +1830,12 @@ void desktop_right_mouse(desktop_t *d,int x,int y,bool down){
         int top=desktop_top_window(d);
         desktop_window_t *w=&d->windows[top];
         if(inside(x,y,w->x,w->y,w->w,w->h))
+        {
+            uint32_t cx=(uint32_t)(x-w->x),cy=(uint32_t)(y-w->y);
+            oxp_native_pointer_to_canvas(cx,cy,(unsigned)w->w,(unsigned)w->h,&cx,&cy);
             native_push_event_slot((unsigned)(top-DESKTOP_NATIVE),
-                NATIVE_EVENT_RIGHT_CLICK | (((unsigned)(x-w->x)&1023u)<<10) |
-                ((unsigned)(y-w->y)&1023u));
+                NATIVE_EVENT_RIGHT_CLICK | (cx<<10) | cy);
+        }
     }else if(down && !d->right_down && desktop_top_window(d)==DESKTOP_MINES)
         mine_toggle_flag(d,mine_cell_at(d,x,y));
     d->right_down=down;
@@ -1681,6 +1885,19 @@ void desktop_key_event(desktop_t *d,const input_event_t *event) {
        (event->code==KEY_ESCAPE && (mods&KEYMOD_CTRL))) {
         d->start_open=!d->start_open;
         d->menu_selection=0;
+        return;
+    }
+    if((mods&KEYMOD_WIN) && (event->code==KEY_UP || event->code==KEY_DOWN)){
+        int top=desktop_top_window(d);
+        if(top>=0){
+            desktop_window_t *w=&d->windows[top];
+            if(event->code==KEY_UP && !w->maximized)
+                (void)desktop_shell_maximize(d,(uint32_t)top);
+            else if(event->code==KEY_DOWN){
+                if(w->maximized)(void)desktop_shell_maximize(d,(uint32_t)top);
+                else w->minimized=true;
+            }
+        }
         return;
     }
     if(mods&KEYMOD_WIN) {

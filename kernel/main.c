@@ -104,6 +104,8 @@ static void native_worker(void *opaque) {
 static bool shell_launch(void *ctx,const char *path) {
     (void)ctx;
     const void *image=NULL;size_t bytes=0;
+    const char *alias=vfs_executable_target(path);
+    if(alias)path=alias;
     if(!initrd_lookup(path,&image,&bytes))return false;
     uint64_t flags=irq_save_disable();
     struct native_job *job=NULL;
@@ -147,6 +149,9 @@ static bool shell_file_copy(void *ctx,const char *from,const char *to){
 static bool shell_file_rename(void *ctx,const char *from,const char *to){
     (void)ctx;return vfs_rename(from,to);
 }
+static bool shell_is_directory(void *ctx,const char *path){
+    (void)ctx;return vfs_kind(path)==VFS_DIRECTORY;
+}
 static bool shell_file_remove(void *ctx,const char *path){
     (void)ctx;return vfs_remove(path);
 }
@@ -167,7 +172,8 @@ static void desktop_interactive_loop(void) {
     shell_services_t services={.ticks=shell_ticks,.free_pages=shell_free,.file_count=shell_count,
         .file_name=shell_name,.run=shell_launch,.read_text=shell_read_text,
         .process_entry=shell_process_entry,.file_copy=shell_file_copy,
-        .file_rename=shell_file_rename,.file_remove=shell_file_remove};
+        .file_rename=shell_file_rename,.file_remove=shell_file_remove,
+        .is_directory=shell_is_directory};
     desktop_init(&desktop,&desktop_fb,services);
     native_reset();
     shell_bridge_reset();shell_bridge_attach(&desktop);
@@ -186,6 +192,14 @@ static void desktop_interactive_loop(void) {
      * If creation or startup fails the legacy kernel-hosted shell remains. */
     if(!shell_launch(0,"bin/windowd"))
         serial_puts("OpenXP: Ring 3 shell unavailable; legacy desktop retained\n");
+#endif
+#ifdef OPENXP_NATIVE_COMPOSE_SELFTEST
+    /* A real native application must paint its own surface, then windowd
+     * must publish the corresponding complete Ring 3-composited scene. */
+    if(!shell_launch(0,"bin/canvas")) {
+        serial_puts("ERROR: native composition probe failed to launch\n");
+        kernel_halt();
+    }
 #endif
 #ifdef OPENXP_NATIVE_WAIT_SELFTEST
     /* Independently verify blocking from an actual preemptible CPL3 worker.
@@ -252,6 +266,9 @@ static void desktop_interactive_loop(void) {
 #endif
     uint64_t last_second=timer_ticks()/100u;
     bool shell_announced=false;
+    bool compositor_announced=false;
+    bool raster_announced=false;
+    bool native_pixels_announced=false;
     for (;;) {
         /* Retired worker stacks must be reclaimed by the boot thread. */
         uint64_t reap_flags=irq_save_disable();
@@ -269,11 +286,35 @@ static void desktop_interactive_loop(void) {
             serial_puts("OPENXP_RING3_SHELL_READY\n");
             shell_announced=true;
         }
+        if(shell_bridge_has_window_plan() && !compositor_announced){
+            /* This proves receipt of a validated Ring 3 composition plan,
+             * not visual correctness or GPU acceleration. */
+            serial_puts("OPENXP_RING3_COMPOSE_READY\n");
+            compositor_announced=true;
+        }
+        if(shell_bridge_raster_ready(OXP_SHELL_LAYER_BACKGROUND) &&
+           shell_bridge_raster_ready(OXP_SHELL_LAYER_OVERLAY) && !raster_announced){
+            /* Both full RGB565 pixel layers have been atomically published by
+             * Ring 3. This checks upload/commit, not monitor pixel output. */
+            serial_puts("OPENXP_RING3_RASTER_READY\n");
+            raster_announced=true;
+        }
+        if(shell_bridge_raster_ready(OXP_SHELL_LAYER_NATIVE) && !native_pixels_announced){
+            serial_puts("OPENXP_RING3_NATIVE_PIXELS_READY\n");
+            native_pixels_announced=true;
+        }
         char requested_app[48];
         if(app_launch_take(requested_app,sizeof(requested_app)))
             (void)shell_launch(NULL,requested_app);
-        bool redraw=native_changed || shell_bridge_take_dirty();
+        /* A live Ring 3 native layer is presented only when windowd has
+           published a new coherent image. App-surface writes must not trigger
+           another full redraw of the *old* native layer: repeated old-frame
+           scanouts caused visible flicker and unnecessary framebuffer traffic. */
+        bool redraw=(native_changed &&
+                     !shell_bridge_raster_ready(OXP_SHELL_LAYER_NATIVE)) ||
+                    shell_bridge_take_dirty();
         input_event_t event;
+        bool cursor_pending=false;
         /* Consume whole PS/2 packets rather than stopping after the first byte.
            Pure cursor movements restore only the cursor's 9x13 underlay; a
            whole-screen repaint on each movement was prohibitively expensive. */
@@ -311,9 +352,13 @@ static void desktop_interactive_loop(void) {
                     if(!redraw)desktop_redraw_moved_window(&desktop,oldx,oldy,which);
                 } else if(event.kind==INPUT_BUTTON || (!was_dragging && desktop.dragging))
                     redraw=true;
-                else if(!redraw)desktop_cursor_update(&desktop);
+                else if(!redraw)cursor_pending=true;
             }
         }
+        /* Coalesce a burst of mouse packets to one cursor write. Moving
+         * through 128 queued events must not repeatedly erase/paint a tiny
+         * hardware overlay within the same foreground-loop iteration. */
+        if(cursor_pending && !redraw)desktop_cursor_update(&desktop);
         char c;
         for(unsigned i=0;i<64 && serial_try_getc(&c);++i) {
             if(c=='\r')c='\n';

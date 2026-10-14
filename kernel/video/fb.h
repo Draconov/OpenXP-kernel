@@ -2,6 +2,7 @@
 #define OPENXP_VIDEO_FB_H
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include "limine_min.h"
 typedef struct { volatile uint8_t *pixels; int width,height,pitch; uint8_t red_size,green_size,blue_size,red_shift,green_shift,blue_shift; bool clip_active; int clip_x,clip_y,clip_w,clip_h; } fb_surface_t;
 bool fb_init(fb_surface_t *s, const struct limine_framebuffer *limine);
@@ -14,6 +15,12 @@ void fb_rect(fb_surface_t *s,int x,int y,int w,int h,uint32_t col);
 /* Convert a private RGB565 scanline into the boot framebuffer with the
  * same clip rules as fb_rect (no unsafe raw device pointer in userspace). */
 void fb_blit565_row(fb_surface_t *s,int x,int y,const uint16_t *src,int n);
+/* Publish an off-screen 32-bit image to a linear framebuffer. Return the
+ * number of pixels actually changed; identical frames require ZERO writes.
+ * The source contains source_stride 32-bit pixels per row, and is never the
+ * hardware framebuffer itself. This cannot guarantee VSync on VGA/VBoxSVGA. */
+size_t fb_present_changed(fb_surface_t *front,const uint32_t *source,
+                          int source_stride,int x,int y,int w,int h);
 void fb_outline(fb_surface_t *s,int x,int y,int w,int h,uint32_t col);
 const uint8_t *fb_glyph5x7(char ch);
 void fb_text(fb_surface_t *s,int x,int y,const char *t,int scale,uint32_t col);

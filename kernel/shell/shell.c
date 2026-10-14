@@ -15,16 +15,32 @@ static void copy(char *dest,const char *src,size_t cap) {
     dest[i]=0;
 }
 static void out(shell_t *s, const char *str) { if (s->output) s->output(s->output_ctx, str); }
+static bool rooted(const char *p) {
+    return prefix(p,"bin/")||prefix(p,"docs/")||prefix(p,"home/")||
+        prefix(p,"windows/")||prefix(p,"program files/")||
+        prefix(p,"system apps/")||prefix(p,"documents and settings/")||
+        prefix(p,"my documents/");
+}
 static void resolve(const shell_t *s,const char *src,char *dest,size_t cap) {
-    size_t n=0;
+    size_t n=0;if(!cap)return;
+    if ((src[0]=='c' || src[0]=='C') && src[1]==':')src+=2;
     if (*src=='/'||*src=='\\') ++src;
-    else if(s->cwd[0] && !prefix(src,"bin/") && !prefix(src,"docs/") && !prefix(src,"home/")) {
+    else if(s->cwd[0] && !rooted(src)) {
         for(size_t j=0;s->cwd[j] && n+1<cap;++j)dest[n++]=s->cwd[j];
     }
     for(size_t j=0;src[j] && n+1<cap;++j) {
         char c=src[j];dest[n++]=(c=='\\')?'/':c;
     }
     dest[n]=0;
+}
+static bool child(const char *cwd,const char *name){
+    size_t n=0;
+    while(cwd[n] && name[n]==cwd[n])++n;
+    if(cwd[n])return false;
+    if(n && name[n++]!='/')return false;
+    if(!name[n])return false;
+    for(;name[n];++n)if(name[n]=='/')return false;
+    return true;
 }
 static void decimal(uint64_t n, char *buffer) {
     char reverse[21]; size_t count=0, i=0;
@@ -34,22 +50,27 @@ static void decimal(uint64_t n, char *buffer) {
 }
 static void listing(shell_t *s) {
     size_t count=s->services.file_count ? s->services.file_count(s->services.ctx):0;
-    out(s,"\nBOOT FILES + TEMPORARY RAM FILES:");
+    out(s,"\nC: DIRECTORY:");
     unsigned listed=0;
     for (size_t i=0;i<count;++i) {
         char name[64];
-        if (s->services.file_name && s->services.file_name(s->services.ctx,i,name,sizeof(name))) {
-            if(!s->cwd[0] || prefix(name,s->cwd)) {out(s,name);++listed;}
+        if(s->services.file_name && s->services.file_name(s->services.ctx,i,name,sizeof(name))) {
+            if(s->services.is_directory ? child(s->cwd,name) :
+               (!s->cwd[0] || prefix(name,s->cwd))) {
+                out(s,name);++listed;
+            }
         }
     }
     if (!listed) out(s,"(no files in this folder)");
 }
 static void tree(shell_t *s) {
-    out(s,"C:\\ (read-only boot files + writable RAM files)");
-    out(s,"  BIN\\");
-    out(s,"  DOCS\\");
-    out(s,"  HOME\\ (temporary)");
-    out(s,"Use DIR to see available files.");
+    out(s,"C:\\  WINDOWS\\ SYSTEM32\\ WEB\\ WALLPAPER\\");
+    out(s,"  PROGRAM FILES\\ OPENXP\\");
+    out(s,"  SYSTEM APPS\\ (*.EXE OpenXP native ELF64)");
+    out(s,"  DOCUMENTS AND SETTINGS\\ USER\\");
+    out(s,"  MY DOCUMENTS\\ MY PICTURES\\ MY MUSIC\\ MY VIDEOS\\");
+    out(s,"  HOME\\ (RAM)  BIN\\  DOCS\\  TEMP\\  RECYCLER\\");
+    out(s,"Use CD <directory> and DIR to browse folders.");
 }
 static bool parse_number(const char **text,uint64_t *value) {
     const char *p=*text;
@@ -180,10 +201,15 @@ void shell_execute(shell_t *s, const char *cmd) {
         char num[24]; decimal(s->services.ticks?s->services.ticks(s->services.ctx):0,num);
         out(s,"PIT TICKS:"); out(s,num);
     } else if (same(lower,"pwd")) {
-        if(s->cwd[0]=='b')out(s,"C:\\BIN");
-        else if(s->cwd[0]=='d')out(s,"C:\\DOCS");
-        else if(s->cwd[0]=='h')out(s,"C:\\HOME");
-        else out(s,"C:\\");
+        if(!s->cwd[0])out(s,"C:\\");
+        else {
+            char line[64]="C:\\";size_t n=3;
+            for(size_t i=0;s->cwd[i] && n+1<sizeof(line);++i){
+                if(s->cwd[i]=='/' && !s->cwd[i+1])break;
+                line[n++]=s->cwd[i]=='/'?'\\':s->cwd[i];
+            }
+            line[n]=0;out(s,line);
+        }
     } else if (same(lower,"whoami")) {
         out(s,"SYSTEM (kernel-hosted desktop)");
     } else if (same(lower,"hostname")) {
@@ -233,17 +259,27 @@ void shell_execute(shell_t *s, const char *cmd) {
               "File deleted.":"Cannot delete (RAM HOME files only).");
     } else if (prefix(lower,"cd ") || same(lower,"cd")) {
         const char *dest=same(lower,"cd")?"":lower+3;
-        if(!*dest) {
-            shell_execute(s,"pwd");
-        } else if(same(dest,"..") || same(dest,"/") || same(dest,"\\") || same(dest,"c:\\")) {
-            s->cwd[0]=0;out(s,"ROOT\\");
-        } else if(same(dest,"bin")||same(dest,"bin/")||same(dest,"/bin")) {
-            copy(s->cwd,"bin/",sizeof(s->cwd));out(s,"C:\\BIN");
-        } else if(same(dest,"docs")||same(dest,"docs/")||same(dest,"/docs")) {
-            copy(s->cwd,"docs/",sizeof(s->cwd));out(s,"C:\\DOCS");
-        } else if(same(dest,"home")||same(dest,"home/")||same(dest,"/home")) {
-            copy(s->cwd,"home/",sizeof(s->cwd));out(s,"C:\\HOME (TEMP)");
-        } else out(s,"Directory not found.");
+        if(!*dest) shell_execute(s,"pwd");
+        else if(same(dest,"/") || same(dest,"\\") || same(dest,"c:\\")) {
+            s->cwd[0]=0;out(s,"C:\\");
+        } else if(same(dest,"..")) {
+            size_t n=0;while(s->cwd[n])++n;
+            if(n && s->cwd[n-1]=='/')--n;
+            while(n && s->cwd[n-1]!='/')--n;
+            s->cwd[n]=0;out(s,"Parent directory.");
+        } else {
+            char path[64];resolve(s,dest,path,sizeof(path));
+            if(s->services.is_directory && !s->services.is_directory(s->services.ctx,path))
+                out(s,"Directory not found.");
+            else if(!s->services.is_directory && !same(path,"bin") &&
+                    !same(path,"docs") && !same(path,"home"))
+                out(s,"Directory not found.");
+            else {
+                size_t i=0;while(path[i] && i+2<sizeof s->cwd){s->cwd[i]=path[i];++i;}
+                if(path[i])out(s,"Directory path too long.");
+                else {s->cwd[i++]='/';s->cwd[i]=0;out(s,"Directory changed.");}
+            }
+        }
     } else if (prefix(lower,"type ") || prefix(lower,"cat ")) {
         char resolved[96],buffer[512];
         resolve(s,lower+(lower[0]=='t'?5:4),resolved,sizeof(resolved));

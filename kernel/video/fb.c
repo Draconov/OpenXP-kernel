@@ -161,3 +161,32 @@ void fb_blit565_row(fb_surface_t *s,int x,int y,const uint16_t *src,int n){
         out[ix]=fb_rgb(s,r,g,b);
     }
 }
+
+/* VirtualBox can scan out a linear framebuffer between two CPU writes.
+ * Skipping identical pixels avoids repeatedly touching large static windows
+ * on otherwise minor updates (taskbar clock, mouse, service heartbeats).
+ * All coordinate math uses wide signed intermediates to avoid overflow. */
+size_t fb_present_changed(fb_surface_t *front,const uint32_t *source,
+                          int source_stride,int x,int y,int w,int h){
+    if(!front || !front->pixels || !source || front->width<=0 ||
+       front->height<=0 || front->width>source_stride ||
+       front->pitch<(int64_t)front->width*4 || w<=0 || h<=0)return 0;
+    int64_t left=x,top=y,right=(int64_t)x+w,bottom=(int64_t)y+h;
+    if(left<0)left=0;
+    if(top<0)top=0;
+    if(right>front->width)right=front->width;
+    if(bottom>front->height)bottom=front->height;
+    if(right<=left || bottom<=top)return 0;
+    size_t writes=0;
+    for(int64_t row=top;row<bottom;++row){
+        volatile uint32_t *dst=(volatile uint32_t *)(front->pixels+(size_t)row*front->pitch);
+        const uint32_t *src=source+(size_t)row*(size_t)source_stride;
+        for(int64_t col=left;col<right;++col){
+            uint32_t pixel=src[col];
+            if(dst[col]==pixel)continue;
+            dst[col]=pixel;
+            ++writes;
+        }
+    }
+    return writes;
+}

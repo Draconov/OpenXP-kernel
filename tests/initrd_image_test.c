@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     verify_file("bin/notepad");
     verify_file("bin/probe");
     verify_file("bin/canvas");
-    assert(initrd_count()==22);
+    assert(initrd_count()>=22);
     verify_file("bin/calendar");
     verify_file("bin/snake");
     verify_file("bin/mines");
@@ -66,6 +66,14 @@ int main(int argc, char **argv) {
     verify_file("bin/filemanager");
     verify_file("bin/run");
     verify_file("bin/settings");
+    const char *wallpapers[]={"windows/web/wallpaper/azure.bmp",
+        "windows/web/wallpaper/meadow.bmp","windows/web/wallpaper/twilight.bmp"};
+    for(size_t i=0;i<3;++i){
+        const void *bmp=NULL;size_t bmp_len=0;
+        assert(initrd_lookup(wallpapers[i],&bmp,&bmp_len));
+        assert(bmp_len>=54 && ((const unsigned char*)bmp)[0]=='B' &&
+               ((const unsigned char*)bmp)[1]=='M');
+    }
     const void *text=NULL;size_t length=0;
     assert(initrd_lookup("docs/readme.txt",&text,&length) && length>20 &&
            !memcmp(text,"OpenXP - Exp",12));

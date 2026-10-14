@@ -1,23 +1,28 @@
 #include "oxp.h"
 #include "game_logic.h"
+#include "ui_layout.h"
 static oxp_snake_t game;
 static void render(void){
-    oxp_draw_cmd_t cmds[32];unsigned n=0;
-    cmds[n++]=(oxp_draw_cmd_t){OXP_DRAW_CLEAR,0,0,0,0,0xe8f2e2};
-    cmds[n++]=(oxp_draw_cmd_t){OXP_DRAW_FILL,9,33,300,130,0xc2d6b7};
-    oxp_draw(cmds,n);
-    oxp_label(10,12,"SNAKE",2,0x19542c);
+    unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
+    oxp_grid_layout_t l=oxp_snake_layout(w,h);
+    oxp_draw_cmd_t cmds[]={
+        {OXP_DRAW_CLEAR,0,0,0,0,0xe8f2e2},
+        {OXP_DRAW_FILL,l.x,l.y,20u*l.tile,10u*l.tile,0xc2d6b7}};
+    oxp_draw(cmds,2);
+    oxp_label(10,10,"SNAKE",2,0x19542c);
     char score[28]="SCORE ";size_t a=6;oxp_u64(score,&a,sizeof score,game.score);
-    oxp_label(153,17,score,1,0x19542c);
-    oxp_fill(9+(game.food%20)*15,33+(game.food/20)*13,13,11,0xce3b42);
+    oxp_label(w-87u,17,score,1,0x19542c);
+    oxp_fill(l.x+(game.food%20u)*l.tile,l.y+(game.food/20u)*l.tile,
+             l.tile>1u?l.tile-1u:1u,l.tile>1u?l.tile-1u:1u,0xce3b42);
     for(unsigned k=0;k<game.length;++k){unsigned p=game.body[k];
-        oxp_fill(9+(p%20)*15,33+(p/20)*13,13,11,k?0x438b4a:0x156b36);
+        oxp_fill(l.x+(p%20u)*l.tile,l.y+(p/20u)*l.tile,
+                 l.tile>1u?l.tile-1u:1u,l.tile>1u?l.tile-1u:1u,
+                 k?0x438b4a:0x156b36);
     }
-    if(game.dead)oxp_label(75,80,"GAME OVER  N RESTART",1,0x962d31);
-    else if(game.won)oxp_label(98,80,"YOU WIN!",2,0x1a612f);
-    else if(!game.started)oxp_label(70,80,"SPACE TO BEGIN",1,0x19542c);
-    else if(game.paused)oxp_label(100,80,"PAUSED",2,0x19542c);
-    oxp_label(10,169,"ARROWS MOVE  SPACE PAUSE  N NEW",1,0x19542c);
+    const char *message=game.dead?"GAME OVER  N RESTART":game.won?"YOU WIN!":
+        !game.started?"SPACE TO BEGIN":game.paused?"PAUSED":NULL;
+    if(message && l.tile>=5u)oxp_label(l.x+7u,l.y+4u*l.tile,message,1,0x19542c);
+    if(h>l.y+10u*l.tile+9u)oxp_label(10,h-10u,"ARROWS MOVE  SPACE PAUSE  N NEW",1,0x19542c);
 }
 void oxp_main(void){
     oxp_snake_reset(&game,(uint32_t)oxp_ticks());

@@ -85,6 +85,21 @@ int main(void) {
     assert(native_copy_surface_row(1,5,row,NATIVE_SURFACE_W));
     assert(row[3]==0xf800 && row[4]==0xf800 && row[2]!=row[3]);
     assert(native_test_pixel(1,3,5)==0xf800);
+    assert(native_canvas_size(100)==((uint64_t)320<<32|180u));
+    assert(native_canvas_size(45)==0); /* PID ownership, not raw slot */
+    native_set_window_size(1,1024u,726u);
+    uint64_t size=native_canvas_size(100);
+    assert((unsigned)(size>>32)<320u && (unsigned)size==180u);
+    assert(native_next_event(100)==NATIVE_EVENT_RESIZE);
+    assert(native_has_surface(1)); /* no flickering during resize */
+    assert(native_test_pixel(1,3,5)==0xf800);
+    native_set_window_size(1,1024u,726u); /* idempotent */
+    assert(native_next_event(100)==0);
+    native_set_window_size(1,640u,190u);
+    size=native_canvas_size(100);
+    assert((unsigned)(size>>32)==320u && (unsigned)size<180u);
+    assert(native_next_event(100)==NATIVE_EVENT_RESIZE);
+    assert(native_canvas_size(42)==((uint64_t)320<<32|180u));
     assert(!native_copy_surface_row(1,NATIVE_SURFACE_H,row,NATIVE_SURFACE_W));
     assert(!native_copy_surface_row(1,5,row,NATIVE_SURFACE_W-1));
     native_draw_cmd_t bad[]={

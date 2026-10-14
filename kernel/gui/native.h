@@ -29,6 +29,7 @@ typedef struct {
 #define NATIVE_EVENT_DOWN 0x10004u
 #define NATIVE_EVENT_LEFT 0x10005u
 #define NATIVE_EVENT_RIGHT 0x10006u
+#define NATIVE_EVENT_RESIZE 0x10007u
 /* Clicks pack x in bits 10..19 and y in bits 0..9; coordinates are
  * window-relative, including the title bar. 10-bit fields are bounded. */
 typedef struct {
@@ -44,6 +45,8 @@ typedef struct {
      * Generation counters let the desktop apply each command just once. */
     uint32_t wm_x, wm_y, wm_width, wm_height;
     uint32_t wm_geometry_serial, wm_focus_serial;
+    uint32_t content_generation;
+    uint32_t canvas_w,canvas_h;
 } native_window_t;
 void native_reset(void);
 bool native_open(uint64_t pid,const char *title,size_t n);
@@ -56,6 +59,8 @@ uint32_t native_wait_event(uint64_t pid, uint64_t timeout_ticks);
 int native_slot_for_owner(uint64_t pid);
 void native_push_event_slot(unsigned slot,uint32_t event);
 void native_close_request_slot(unsigned slot);
+void native_set_window_size(unsigned slot,unsigned width,unsigned height);
+uint64_t native_canvas_size(uint64_t pid);
 void native_owner_exit(uint64_t pid);
 native_window_t native_snapshot_slot(unsigned slot);
 bool native_dirty_take(void);

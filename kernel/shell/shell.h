@@ -18,11 +18,12 @@ typedef struct {
     bool (*file_copy)(void *ctx,const char *from,const char *to);
     bool (*file_rename)(void *ctx,const char *from,const char *to);
     bool (*file_remove)(void *ctx,const char *path);
+    bool (*is_directory)(void *ctx,const char *path);
 } shell_services_t;
 
 typedef struct {
     char input[96];
-    char cwd[16];
+    char cwd[96];
     size_t used;
     size_t cursor;
     char history[8][96];

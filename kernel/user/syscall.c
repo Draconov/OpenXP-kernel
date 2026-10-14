@@ -83,6 +83,8 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         return (struct syscall_result){0,
             native_draw(process_current_pid(),cmds,(size_t)frame->rsi)?0u:(uint64_t)-OPENXP_EINVAL};
     }
+    case OPENXP_SYS_GUI_CANVAS_SIZE:
+        return (struct syscall_result){0,native_canvas_size(process_current_pid())};
     case OPENXP_SYS_GUI_EVENT:
         return (struct syscall_result){0,native_next_event(process_current_pid())};
     case OPENXP_SYS_GUI_WAIT:
@@ -127,7 +129,7 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
     }
     case OPENXP_SYS_FS_OP: {
         const address_space_t *space=userspace_current_space();
-        if(!space || frame->rdi<APP_FS_LIST || frame->rdi>APP_FS_COPY)
+        if(!space || frame->rdi<APP_FS_LIST || frame->rdi>APP_FS_READ_SLICE)
             return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
         if(!aspace_range_valid(space,frame->rsi,sizeof(app_file_request_t),true))
             return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
@@ -145,12 +147,22 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         uint64_t saved=irq_save_disable();
         switch(frame->rdi){
         case APP_FS_LIST:
-            result=vfs_name_at(req.index,req.path,sizeof req.path)?0:(uint64_t)-OPENXP_EINVAL;
+            result=(req.dest[0]=='D' && req.dest[1]==0 ?
+                vfs_list_dir(req.path,req.index,req.path,sizeof req.path) :
+                vfs_name_at(req.index,req.path,sizeof req.path))?
+                0:(uint64_t)-OPENXP_EINVAL;
             if(!result)req.size=0;
             break;
         case APP_FS_READ: {
             size_t n=0;
             bool ok=vfs_read(req.path,req.data,APP_FILE_DATA,&n);
+            req.size=ok?(uint32_t)n:0;
+            result=ok?0:(uint64_t)-OPENXP_EINVAL;
+            break;
+        }
+        case APP_FS_READ_SLICE: {
+            size_t n=0;
+            bool ok=vfs_read_slice(req.path,req.index,req.data,req.size,&n);
             req.size=ok?(uint32_t)n:0;
             result=ok?0:(uint64_t)-OPENXP_EINVAL;
             break;
@@ -173,7 +185,8 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         default:result=(uint64_t)-OPENXP_EINVAL;break;
         }
         irq_restore(saved);
-        if(frame->rdi==APP_FS_LIST || frame->rdi==APP_FS_READ){
+        if(frame->rdi==APP_FS_LIST || frame->rdi==APP_FS_READ ||
+           frame->rdi==APP_FS_READ_SLICE){
             if(!result && !aspace_copy_to_user((address_space_t *)space,frame->rsi,&req,sizeof(req)))
                 return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
         }
@@ -240,6 +253,58 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         return (struct syscall_result){0,
             native_wm_manage(target_pid,command.action,command.x,command.y,
                              command.width,command.height)?0u:(uint64_t)-OPENXP_EINVAL};
+    }
+    case OPENXP_SYS_NATIVE_INFO:
+    case OPENXP_SYS_NATIVE_ROW: {
+        if(!capipc_is_server(process_current_pid()))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        const address_space_t *space=userspace_current_space();
+        uint32_t slot=(uint32_t)frame->rdi;
+        if(!space || frame->rdi>=OXP_NATIVE_SLOTS)
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(frame->rax==OPENXP_SYS_NATIVE_INFO){
+            if(frame->rdx!=sizeof(oxp_native_info_t) ||
+               !aspace_range_valid(space,frame->rsi,sizeof(oxp_native_info_t),true))
+                return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+            native_window_t snapshot=native_snapshot_slot(slot);
+            oxp_native_info_t info={0};
+            info.active=snapshot.active?1u:0u;
+            info.painted=native_has_surface(slot)?1u:0u;
+            info.generation=snapshot.content_generation;
+            for(unsigned i=0;i<sizeof(info.title);++i)info.title[i]=snapshot.title[i];
+            for(unsigned i=0;i<sizeof(info.text);++i)info.text[i]=snapshot.text[i];
+            return (struct syscall_result){0,
+                aspace_copy_to_user((address_space_t *)space,frame->rsi,&info,sizeof(info))
+                    ?0u:(uint64_t)-OPENXP_EFAULT};
+        }
+        if(!aspace_range_valid(space,frame->rsi,sizeof(oxp_native_row_t),true))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        oxp_native_row_t row={.slot=slot};
+        /* RDX is the bounded scanline index. */
+        if(frame->rdx>=OXP_NATIVE_H ||
+           !native_copy_surface_row(slot,(unsigned)frame->rdx,row.pixels,OXP_NATIVE_W))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        row.y=(uint32_t)frame->rdx;
+        return (struct syscall_result){0,
+            aspace_copy_to_user((address_space_t *)space,frame->rsi,&row,sizeof(row))
+                ?0u:(uint64_t)-OPENXP_EFAULT};
+    }
+    case OPENXP_SYS_SHELL_RASTER_ROW:
+    case OPENXP_SYS_SHELL_RASTER_COMMIT: {
+        uint64_t pid=process_current_pid();
+        if(!capipc_is_server(pid))return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        if(frame->rax==OPENXP_SYS_SHELL_RASTER_COMMIT)
+            return (struct syscall_result){0,shell_bridge_raster_commit(pid,(uint32_t)frame->rdi)
+                ?0u:(uint64_t)-OPENXP_EINVAL};
+        const address_space_t *space=userspace_current_space();
+        if(!space || frame->rsi!=sizeof(oxp_shell_raster_row_t) ||
+           !aspace_range_valid(space,frame->rdi,sizeof(oxp_shell_raster_row_t),false))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        oxp_shell_raster_row_t row;
+        if(!aspace_copy_from_user(space,&row,frame->rdi,sizeof(row)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,shell_bridge_raster_row(pid,&row)
+            ?0u:(uint64_t)-OPENXP_EINVAL};
     }
     case OPENXP_SYS_SHELL_EVENT:
     case OPENXP_SYS_SHELL_WINDOW:

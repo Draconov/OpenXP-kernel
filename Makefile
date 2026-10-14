@@ -14,7 +14,7 @@ OBJECTS := $(patsubst kernel/%.c,$(BUILD)/%.o,$(C_SOURCES)) $(patsubst kernel/%.
 -include $(OBJECTS:.o=.d)
 ISO := $(BUILD)/openxp.iso
 
-.PHONY: test-native-games test-native-games-sanitize smoke-shell test-shell-bridge test-shell-bridge-sanitize test-window-protocol test-window-protocol-sanitize test-capipc test-capipc-sanitize smoke-window-ipc kernel-storage iso-storage run-storage smoke-native smoke-native-wait smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
+.PHONY: smoke-native-compose smoke-raster smoke-compositor test-native-games test-native-games-sanitize smoke-shell test-shell-bridge test-shell-bridge-sanitize test-window-protocol test-window-protocol-sanitize test-capipc test-capipc-sanitize smoke-window-ipc kernel-storage iso-storage run-storage smoke-native smoke-native-wait smoke-deep test-desktop test-desktop-sanitize all kernel iso run smoke smoke-initrd smoke-exception smoke-guard smoke-timer smoke-sync smoke-user smoke-process smoke-user-preempt smoke-user-fault smoke-user-protection test-unit test-sanitize clean
 all: iso
 kernel: $(BUILD)/openxp.elf
 $(BUILD)/%.o: kernel/%.c
@@ -42,13 +42,24 @@ $(BUILD)/apps/native_start.o: apps/native/start.S
 $(BUILD)/apps/%.bin: $(BUILD)/apps/%.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o apps/native/app.ld
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $< $(BUILD)/apps/native_runtime.o -o $@
 $(BUILD)/apps/windowd.native.o $(BUILD)/apps/winclient.native.o: apps/native/wm_protocol.h
+$(BUILD)/apps/native_scene.o: apps/native/native_scene.c apps/native/native_scene.h apps/native/shell_raster.h
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/wallpaper.o: apps/native/wallpaper.c apps/native/wallpaper.h
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/windowd.native.o: apps/native/native_scene.h
 $(BUILD)/apps/windowd.native.o: kernel/user/wm_display.h
+$(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h kernel/user/shell_abi.h
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -Wall -Wextra -Werror -Ikernel -c $< -o $@
 $(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o apps/native/app.ld
-	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o -o $@
-$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) tools/mkinitrd.py
+$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o apps/native/app.ld
+	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o -Map $(BUILD)/apps/windowd.map -o $@
+	python3 tools/check_windowd_bss.py $(BUILD)/apps/windowd.map
+$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) tools/mkinitrd.py $(wildcard assets/wallpapers/*.bmp)
 	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS)
 $(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
 $(BUILD)/openxp.elf: $(OBJECTS) kernel/linker.ld
@@ -90,6 +101,13 @@ smoke-native-wait:
 	bash scripts/smoke.sh build/native-wait/openxp.iso OPENXP_NATIVE_WAIT_OK
 smoke-shell: iso
 	bash scripts/smoke.sh $(ISO) OPENXP_RING3_SHELL_READY
+smoke-compositor: iso
+	bash scripts/smoke.sh $(ISO) OPENXP_RING3_COMPOSE_READY
+smoke-raster: iso
+	bash scripts/smoke.sh $(ISO) OPENXP_RING3_RASTER_READY
+smoke-native-compose:
+	$(MAKE) BUILD=build/native-composition EXTRA_CFLAGS=-DOPENXP_NATIVE_COMPOSE_SELFTEST iso
+	bash scripts/smoke.sh build/native-composition/openxp.iso OPENXP_RING3_NATIVE_PIXELS_READY
 smoke-deep:
 	$(MAKE) BUILD=build/deep EXTRA_CFLAGS=-DOPENXP_DEEP_SELFTEST iso
 	bash scripts/smoke.sh build/deep/openxp.iso OPENXP_DEEP_OK
@@ -168,11 +186,13 @@ test-window-protocol-sanitize:
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
 	build/tests/wm_capipc_sanitized
 
-test-unit: test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
+test-unit: test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
 	build/tests/native_wait_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
 	build/tests/vfs_test $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/app_launch_test.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_test
+	build/tests/app_launch_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_test
 	build/tests/pci_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_test
@@ -221,11 +241,13 @@ test-unit: test-native-games test-shell-bridge test-window-protocol test-desktop
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
 	build/tests/sync_test
 
-test-sanitize: test-native-games-sanitize test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
+test-sanitize: test-native-text-layout-sanitize test-native-layout-sanitize test-wallpaper-sanitize test-native-scene-sanitize test-shell-raster-sanitize test-compositor-integration-sanitize test-native-games-sanitize test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
 	build/tests/native_wait_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
 	build/tests/vfs_sanitized $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/app_launch_test.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_sanitized
+	build/tests/app_launch_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_sanitized
 	build/tests/pci_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_sanitized
@@ -321,3 +343,77 @@ test-native-sanitize:
 	build/tests/native_text_edit_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_theme_test.c -o build/tests/native_theme_sanitized
 	build/tests/native_theme_sanitized
+
+# Pixel-level integration through the actual desktop renderer, not only a
+# synthetic command-list unit test. Hardware input/VM runtime still separate.
+.PHONY: test-compositor-integration test-compositor-integration-sanitize
+test-compositor-integration:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/compositor_integration_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_test
+	$(BUILD)/tests/compositor_integration_test
+test-compositor-integration-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/compositor_integration_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_sanitized
+	$(BUILD)/tests/compositor_integration_sanitized
+
+.PHONY: test-shell-raster test-shell-raster-sanitize
+test-shell-raster:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_raster_test.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_test
+	$(BUILD)/tests/shell_raster_test
+test-shell-raster-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_raster_test.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_sanitized
+	$(BUILD)/tests/shell_raster_sanitized
+
+.PHONY: test-native-scene test-native-scene-sanitize
+test-native-scene:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c -o $(BUILD)/tests/native_scene_test
+	$(BUILD)/tests/native_scene_test
+test-native-scene-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c -o $(BUILD)/tests/native_scene_sanitized
+	$(BUILD)/tests/native_scene_sanitized
+
+# Regression: incremental desktop regions must exactly match a full composed
+# frame, including cursor underlay, window movement and taskbar updates.
+.PHONY: test-present test-present-sanitize
+test-present:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_present_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_test
+	$(BUILD)/tests/desktop_present_test
+test-present-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_present_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_sanitized
+	$(BUILD)/tests/desktop_present_sanitized
+
+.PHONY: test-wallpaper test-wallpaper-sanitize
+test-wallpaper:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror tests/wallpaper_test.c apps/native/wallpaper.c -o build/tests/wallpaper_test
+	build/tests/wallpaper_test
+test-wallpaper-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/wallpaper_test.c apps/native/wallpaper.c -o build/tests/wallpaper_sanitized
+	build/tests/wallpaper_sanitized
+
+.PHONY: test-native-layout test-native-layout-sanitize
+test-native-layout:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_layout_test.c -o $(BUILD)/tests/native_layout_test
+	$(BUILD)/tests/native_layout_test
+test-native-layout-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_layout_test.c -o $(BUILD)/tests/native_layout_sanitized
+	$(BUILD)/tests/native_layout_sanitized
+
+.PHONY: test-native-text-layout test-native-text-layout-sanitize
+test-native-text-layout:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_text_layout_test.c -o $(BUILD)/tests/native_text_layout_test
+	$(BUILD)/tests/native_text_layout_test
+test-native-text-layout-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_text_layout_test.c -o $(BUILD)/tests/native_text_layout_sanitized
+	$(BUILD)/tests/native_text_layout_sanitized

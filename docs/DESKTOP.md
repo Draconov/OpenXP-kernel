@@ -13,18 +13,18 @@ a protected userspace windowing system.
 | Feature | Interaction |
 | --- | --- |
 | Start menu | Two columns of built-in programs, with mouse or keyboard selection |
-| Windows | Click to focus; drag title bars; minimize or close |
+| Windows | Click to focus; drag title bars; minimize, maximize/restore or close |
 | Taskbar | Reopen or switch built-in windows |
 | Terminal | Type commands, use Enter and Backspace |
 | Keyboard | Windows key opens Start; arrow keys and Enter select its items |
-| File browser | Browse read-only boot files and temporary HOME files; open saved text or Paint images |
+| File browser | XP-inspired Explorer with folders, file-type icons, associated Open actions, context menu and temporary HOME operations |
 | Notepad | Edit text, Ctrl+N for new, Ctrl+S/Ctrl+O to save/open a temporary HOME file |
 | WordPad | Editable text (4,095 chars), bold/zoom display, temporary HOME save/open |
 | Calendar | Gregorian month grid, date highlighting from guest CMOS RTC, keyboard and pointer controls |
 | Calculator | Four-operation integer arithmetic; buttons and keyboard |
 | Paint | Eight-color 160 x 100 drawing surface with temporary HOME save/open |
 | System Monitor | Uptime, free 4 KiB pages and open window status (not a process list) |
-| Appearance | Three selectable wallpaper presets, reset at reboot |
+| Appearance | Three color schemes plus bundled BMP wallpapers, reset on reboot |
 | Mines | 9 x 9, ten mines, guaranteed safe first click; right-click flags |
 | Clock & Stopwatch | Stopwatch and countdown timer driven by the monotonic 100 Hz PIT tick count |
 | Snake | Grid-based arcade game; use arrow keys, Space to pause, N to restart |
@@ -205,8 +205,10 @@ native broker triggers a legacy fallback instead of silently failing.
 - `RUN BIN/MONITOR`: read-only uptime and available physical page count.
 - `RUN BIN/ABOUT`: informational window.
 
-These new windows use a fixed-size 320x180 software-rendered canvas, not
-GPU acceleration. Native graphics and input still require VirtualBox testing.
+These windows retain a bounded 320×180 RGB565 backing store, but a logical
+canvas sized from the current client aspect ratio now fills the window. Native
+app drawing and pointer hit areas reflow after the `OXP_RESIZE` event. There
+is still no GPU acceleration. Native graphics and input require VM testing.
 
 ## Native migration update
 
@@ -231,3 +233,30 @@ fallbacks while guest verification and feature parity are incomplete.
 Final pixel rendering and legacy window controllers still run in Ring 0.
 Moving those out requires a separately tested userspace compositor and full
 application parity; the fallback must remain available until then.
+
+## XP-style file browsing
+
+The native File Manager now shows **immediate children** of `C:\` folders,
+instead of a flat list of every boot file. Use Enter or click an already
+selected folder to open it, Backspace or the Up control to return to its parent,
+and Enter on supported `.exe` entries to request an OpenXP Ring 3 launch.
+
+The built-in system folders and wallpaper asset path are explained in
+[Filesystem and wallpapers](FILESYSTEM.md). The native Terminal supports
+`CD`/`DIR` navigation, and Run accepts supported app names and `.exe` aliases.
+
+For current native file associations, Explorer controls, and custom image requirements, see [Explorer and wallpapers](EXPLORER.md).
+
+## Window sizing
+
+Every legacy and native application window has three title-bar controls: **Minimize**,
+**Maximize/Restore** and **Close**, arranged left-to-right as in Windows XP.
+Maximizing uses the screen area above the taskbar. Click the middle button again
+to return to the saved window dimensions and location. Minimized maximized
+windows remain maximized when restored through the taskbar.
+
+The Ring 3 desktop also supports **Win+Up** to maximize and **Win+Down** to
+restore (or minimize when already in the normal state). The native SDK now
+reports the logical canvas dimensions and emits resize events whenever they
+change; the principal native applications reflow their content and click targets.
+The recovery desktop keeps the same title-bar controls.

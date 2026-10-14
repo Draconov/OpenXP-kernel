@@ -71,7 +71,7 @@ buffers through the process address-space mapping.
 | --- | --- | --- |
 | 6 | `GUI_OPEN(user_title, title_len)` | Open one of three PID-owned windows; 0 on success |
 | 7 | `GUI_TEXT(user_text, text_len)` | Update native text content; 0 on success |
-| 8 | `GUI_EVENT()` | Nonblocking event: ASCII, 8 Backspace, 10 Enter, 27 Escape, `0x10000` close, `0x10001` Ctrl+S, `0x10002` Ctrl+O, bit 31 left-click, bit 30 right-click, or `0x10003..0x10006` directional keys |
+| 8 | `GUI_EVENT()` | Nonblocking event: ASCII, 8 Backspace, 10 Enter, 27 Escape, `0x10000` close, `0x10001` Ctrl+S, `0x10002` Ctrl+O, bit 31 left-click, bit 30 right-click, or `0x10003..0x10006` directional keys, or `0x10007` canvas-resize |
 | 9 | `RAM_READ(user_buf, max_size)` | Byte count or negative error; fixed temporary note path |
 | 10 | `RAM_WRITE(user_buf, size)` | Byte count or negative error; fixed temporary note path |
 | 11 | `GUI_DRAW(user_commands, count)` | Atomically validate and draw 1–32 fixed-size commands to the calling PID's private surface; 0 or negative error |
@@ -80,6 +80,7 @@ buffers through the process address-space mapping.
 | 26 | `FREE_PAGES()` | Read-only free 4 KiB physical page count |
 | 27 | `FS_OP(operation, request*)` | Bounded named-file list/read/write/rename/delete/kind; 1,024-byte transfer maximum |
 | 28 | `APP_LAUNCH(path*, length)` | Queue an allowlisted bundled application to launch from the boot thread; 0 means queued, not yet started |
+| 33 | `GUI_CANVAS_SIZE()` | Owner-only current logical width in high 32 bits and height in low 32 bits; 0 if no native window |
 
 The new game/calendar logic lives in `apps/native/game_logic.h` with host-side
 regression tests (`make test-native-games`). The boot archive now supports 32 records, with 22 entries in the current
@@ -99,12 +100,18 @@ requires confirmation.**
 ## Security and compatibility boundaries
 
 - Up to **three** simultaneous PID-owned native windows, each with an
-  independent **320×180 RGB565** pixel surface and/or text content.
+  independent **320×180 RGB565** backing surface and/or text content.
+  The visible logical canvas is cropped in one dimension to match the client
+  aspect ratio (e.g. a tall window uses fewer logical columns), then nearest-
+  neighbour scaled to fill the client. The app queries its current canvas with
+  `oxp_canvas_width()` / `oxp_canvas_height()`.
   The owner is checked for updates and event reads; exit/fault releases its
   window. The fourth concurrent `GUI_OPEN` fails cleanly.
 - Input follows window focus, and client mouse click events encode window-local
   x in bits 10–19 and y in bits 0–9, with bit 31 set. Coordinates include
-  the window decorations. Resizing is not implemented.
+  the window decorations. Dragging the bottom-right grip and maximizing/
+  restoring both resize the logical canvas. Native apps receive `OXP_RESIZE`
+  only when its logical dimensions change; event-driven apps should repaint.
 - Drawing commands support **clear**, **filled rectangle**, and **5×7 glyph**
 (scale 1–2) operations, with colors `0x00RRGGBB`. The kernel copies and
 validates each bounded syscall batch before updating an owner-only surface;

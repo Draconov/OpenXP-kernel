@@ -1,6 +1,9 @@
 #include "oxp.h"
 #include "wm_protocol.h"
 #include "theme.h"
+#include "wallpaper.h"
+#include "shell_raster.h"
+#include "native_scene.h"
 #include "../../kernel/user/wm_display.h"
 #include "../../kernel/user/shell_abi.h"
 #include "../../kernel/input/input.h"
@@ -12,6 +15,49 @@
 static wm_state_t state;
 static uint64_t channels[WM_SERVICE_CHANNELS];
 static uint32_t shell_theme;
+/* Decoded, downsampled RGB565 image; no raw framebuffer mapping in Ring 3. */
+static uint16_t wallpaper_pixels[OXP_WALL_W*OXP_WALL_H];
+static int wallpaper_active;
+static unsigned last_wallpaper_generation,wallpaper_generation;
+static unsigned wallpaper_ordinal;
+static char wallpaper_path[96];
+static int selected_wallpaper_path(unsigned index,char *path){
+    for(unsigned i=0,match=0;i<32u;++i){
+        app_file_request_t request={0};
+        oxp_copy(request.path,"windows/web/wallpaper",sizeof request.path);
+        request.dest[0]='D';request.index=i;
+        if(oxp_file(APP_FS_LIST,&request))break;
+        const char *str=request.path;unsigned n=0;
+        while(str[n])++n;
+        if(n>=4 && str[n-4]=='.' && str[n-3]=='b' && str[n-2]=='m' && str[n-1]=='p'){
+            if(match++==index){oxp_copy(path,str,96);return 1;}
+        }
+    }
+    return 0;
+}
+static int bmp_reader(void *context,uint32_t offset,void *out,uint32_t count){
+    const char *path=(const char *)context;
+    uint8_t *dst=out;
+    while(count){
+        app_file_request_t req={0};oxp_copy(req.path,path,sizeof req.path);
+        uint32_t amount=count>APP_FILE_DATA?APP_FILE_DATA:count;
+        req.index=offset;req.size=amount;
+        if(oxp_file(APP_FS_READ_SLICE,&req)||req.size!=amount)return 0;
+        for(uint32_t i=0;i<amount;++i)dst[i]=req.data[i];
+        offset+=amount;dst+=amount;count-=amount;
+    }
+    return 1;
+}
+static int apply_wallpaper(unsigned ordinal){
+    char path[96];if(!selected_wallpaper_path(ordinal,path))return 0;
+    /* On failure do not change selected wallpaper. */
+    if(!oxp_wall_decode(bmp_reader,path,wallpaper_pixels))return 0;
+    wallpaper_active=1;wallpaper_ordinal=ordinal;
+    ++wallpaper_generation;
+    oxp_copy(wallpaper_path,path,sizeof wallpaper_path);
+    return 1;
+}
+
 
 static int apply_window(uint64_t channel,const wm_packet_t *request,
                         const wm_packet_t *reply){
@@ -68,8 +114,15 @@ static int service_one(unsigned slot){
         if(oxp_theme_valid(request.x) &&
            (int64_t)oxp_call(23,OXP_SHELL_THEME,request.x)==0){
             shell_theme=request.x;
+            wallpaper_active=0;
+            ++wallpaper_generation;
             reply.status=WM_OK;
         }
+    }else if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
+             request.version==WM_VERSION && request.operation==WM_WALLPAPER){
+        reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
+            .operation=WM_WALLPAPER|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
+        if(request.x<32u && apply_wallpaper(request.x))reply.status=WM_OK;
     }else if(count==(int64_t)sizeof(request)) {
         wm_packet_t before={.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_QUERY,.window_id=request.window_id};
@@ -109,12 +162,128 @@ static int service_one(unsigned slot){
 #define SHELL_TASK_TOP 726u
 static oxp_shell_draw_t shell_frame[OXP_SHELL_DRAW_MAX];
 static unsigned drawn;
+static int frame_overflow;
+static oxp_shell_raster_row_t raster_row;
+static oxp_shell_draw_t previous_frame[OXP_SHELL_DRAW_MAX];
+static unsigned previous_count;
+static int previous_valid;
+/* Compare each drawing layer independently: dragging windows should not
+ * upload a new wallpaper or taskbar if their pixels have not changed. */
+static int layer_changed(unsigned layer){
+    if(layer==0 && wallpaper_generation!=last_wallpaper_generation)return 1;
+    if(!previous_valid)return 1;
+    unsigned a=0,b=0;
+    for(;;){
+        while(a<drawn){
+            unsigned op=shell_frame[a].op;
+            if((layer==0 && (op==OXP_SHELL_BG_RECT || op==OXP_SHELL_BG_TEXT)) ||
+               (layer==1 && (op==OXP_SHELL_RECT || op==OXP_SHELL_TEXT)))break;
+            ++a;
+        }
+        while(b<previous_count){
+            unsigned op=previous_frame[b].op;
+            if((layer==0 && (op==OXP_SHELL_BG_RECT || op==OXP_SHELL_BG_TEXT)) ||
+               (layer==1 && (op==OXP_SHELL_RECT || op==OXP_SHELL_TEXT)))break;
+            ++b;
+        }
+        if(a>=drawn || b>=previous_count)return (a<drawn)!=(b<previous_count);
+        const uint8_t *x=(const uint8_t *)&shell_frame[a];
+        const uint8_t *y=(const uint8_t *)&previous_frame[b];
+        for(unsigned k=0;k<sizeof(oxp_shell_draw_t);++k)
+            if(x[k]!=y[k])return 1;
+        ++a;++b;
+    }
+}
+static int publish_pixel_layers(unsigned mask){
+    for(unsigned layer=0;layer<2;++layer){
+        if(!(mask&(1u<<layer)))continue;
+        raster_row.layer=layer;
+        for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+            raster_row.y=y;
+            if(layer==0 && wallpaper_active && y<SHELL_TASK_TOP){
+                unsigned sy=(y*OXP_WALL_H)/SHELL_TASK_TOP;
+                for(unsigned x=0;x<OXP_SHELL_RASTER_W;++x)
+                    raster_row.pixels[x]=wallpaper_pixels[sy*OXP_WALL_W+
+                                                       x*OXP_WALL_W/OXP_SHELL_RASTER_W];
+                oxp_raster_overlay_background(shell_frame,drawn,y,raster_row.pixels);
+            }else oxp_raster_row(shell_frame,drawn,layer,y,raster_row.pixels);
+            if((int64_t)oxp_call3(29,(uint64_t)&raster_row,sizeof(raster_row),0)!=0)
+                return -1;
+        }
+    }
+    return (int64_t)oxp_call(30,mask,0)==0?0:-1;
+}
+
+/* Windowd now constructs native window pixels, not just their order.
+ * Static data lives in the service's private writable ELF segment. */
+static oxp_shell_window_t shell_windows[17];
+static oxp_native_info_t native_infos[OXP_NATIVE_SLOTS];
+static oxp_native_info_t old_native_infos[OXP_NATIVE_SLOTS];
+static oxp_shell_window_t old_native_windows[OXP_NATIVE_SLOTS];
+static uint16_t native_buffers[OXP_NATIVE_SLOTS][OXP_NATIVE_W*OXP_NATIVE_H];
+static oxp_native_row_t native_scanline;
+static int native_scene_valid;
+static int bytes_differ(const void *left,const void *right,size_t size){
+    const uint8_t *a=left,*b=right;
+    for(size_t i=0;i<size;++i)if(a[i]!=b[i])return 1;
+    return 0;
+}
+static int publish_native_scene(void){
+    int changed=!native_scene_valid;
+    oxp_shell_window_t views[OXP_NATIVE_SLOTS];
+    for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
+        int64_t ret=(int64_t)oxp_call3(31,i,(uint64_t)&native_infos[i],sizeof(native_infos[i]));
+        if(ret)return -1;
+        views[i]=shell_windows[14u+i];
+        if(bytes_differ(&native_infos[i],&old_native_infos[i],sizeof(native_infos[i])) ||
+           bytes_differ(&views[i],&old_native_windows[i],sizeof(views[i])))changed=1;
+        if(native_infos[i].active && native_infos[i].painted &&
+           (!native_scene_valid || old_native_infos[i].generation!=native_infos[i].generation ||
+            !old_native_infos[i].painted)){
+            for(unsigned y=0;y<OXP_NATIVE_H;++y){
+                /* An app can exit while its pixels are being captured. This
+                 * is a normal lifecycle race, not a reason to kill windowd. */
+                if((int64_t)oxp_call3(32,i,(uint64_t)&native_scanline,y)){
+                    native_infos[i].active=0;
+                    native_infos[i].painted=0;
+                    native_infos[i].generation=0;
+                    changed=1;
+                    break;
+                }
+                for(unsigned x=0;x<OXP_NATIVE_W;++x)
+                    native_buffers[i][y*OXP_NATIVE_W+x]=native_scanline.pixels[x];
+            }
+        }
+    }
+    if(!native_scene_valid){
+        int has_clients=0;
+        for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i)has_clients|=native_infos[i].active!=0;
+        if(!has_clients)return 0; /* no expensive blank scene at boot */
+    }
+    if(!changed)return 0;
+    raster_row.layer=OXP_SHELL_LAYER_NATIVE;
+    for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+        raster_row.y=y;
+        oxp_native_scene_row(views,native_infos,native_buffers,y,raster_row.pixels);
+        if((int64_t)oxp_call3(29,(uint64_t)&raster_row,sizeof(raster_row),0))return -1;
+    }
+    if((int64_t)oxp_call(30,OXP_SHELL_MASK_NATIVE,0))return -1;
+    for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
+        old_native_infos[i]=native_infos[i];
+        old_native_windows[i]=views[i];
+    }
+    native_scene_valid=1;
+    return 0;
+}
+
 static int menu_visible;
 static uint32_t menu_cursor;
 static int32_t drag_index=-1;
+static int32_t resize_index=-1;
+static int32_t resize_start_w,resize_start_h;
 static int32_t drag_anchor_x,drag_anchor_y,drag_start_x,drag_start_y;
 
-static oxp_shell_window_t shell_windows[17];
+
 static const char *menu_name(unsigned i){
     switch(i){
     case 0:return "TERMINAL";
@@ -135,28 +304,44 @@ static const char *menu_name(unsigned i){
     }
 }
 static void add_background_rect(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
-    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
     shell_frame[drawn++]=(oxp_shell_draw_t){.op=OXP_SHELL_BG_RECT,
         .x=x,.y=y,.w=w,.h=h,.color=color};
 }
 static void add_background_text(unsigned x,unsigned y,const char *s,unsigned scale,uint32_t color){
-    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
     oxp_shell_draw_t *cmd=&shell_frame[drawn++];
     *cmd=(oxp_shell_draw_t){.op=OXP_SHELL_BG_TEXT,.x=x,.y=y,.w=scale,.color=color};
     unsigned i=0;while(s[i]&&i<OXP_SHELL_TEXT_MAX-1){cmd->text[i]=s[i];++i;}
     cmd->text[i]=0;
 }
 static void add_rect(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
-    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
     shell_frame[drawn++]=(oxp_shell_draw_t){.op=OXP_SHELL_RECT,
         .x=x,.y=y,.w=w,.h=h,.color=color};
 }
 static void add_text(unsigned x,unsigned y,const char *s,unsigned scale,uint32_t color){
-    if(drawn>=OXP_SHELL_DRAW_MAX)return;
+    if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
     oxp_shell_draw_t *cmd=&shell_frame[drawn++];
     *cmd=(oxp_shell_draw_t){.op=OXP_SHELL_TEXT,.x=x,.y=y,.w=scale,.color=color};
     unsigned i=0;while(s[i]&&i<OXP_SHELL_TEXT_MAX-1){cmd->text[i]=s[i];++i;}
     cmd->text[i]=0;
+}
+static void add_window_composition(void){
+    if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
+    shell_frame[drawn++]=(oxp_shell_draw_t){.op=OXP_SHELL_COMPOSE_BEGIN};
+    /* Only the userspace shell chooses draw order. The kernel validates
+     * the indices, maps them to existing windows and blits owned surfaces. */
+    for(unsigned z=0;z<17u;++z){
+        for(unsigned i=0;i<17u;++i){
+            const oxp_shell_window_t *win=&shell_windows[i];
+            if(win->visible && !win->minimized && win->z==z){
+                if(drawn>=OXP_SHELL_DRAW_MAX){frame_overflow=1;return;}
+                shell_frame[drawn++]=(oxp_shell_draw_t){
+                    .op=OXP_SHELL_COMPOSE_WINDOW,.x=i};
+            }
+        }
+    }
 }
 static void refresh_windows(void){
     for(unsigned i=0;i<17u;++i){
@@ -170,7 +355,7 @@ static void decimal(char *buffer,uint64_t value){
     while(n)buffer[i++]=temp[--n];buffer[i]=0;
 }
 static int paint_shell(void){
-    refresh_windows();drawn=0;
+    refresh_windows();drawn=0;frame_overflow=0;
     /* Desktop wallpaper and icon placement are composed in Ring 3. The
        privileged layer only rasterizes validated commands behind windows. */
     add_background_rect(0,0,SHELL_W,SHELL_TASK_TOP,oxp_theme_wallpaper(shell_theme));
@@ -186,6 +371,7 @@ static int paint_shell(void){
     add_background_text(30,138,"DOCUMENTS",1,0xffffff);
     add_background_rect(14,206,94,65,0x286db7);
     add_background_text(30,228,"TERMINAL",1,0xffffff);
+    add_window_composition();
     add_rect(0,SHELL_TASK_TOP,SHELL_W,42,oxp_theme_taskbar(shell_theme));
     add_rect(0,SHELL_TASK_TOP,1024,3,0x78ace6);
     add_rect(2,SHELL_TASK_TOP+4,105,35,oxp_theme_start(shell_theme));
@@ -216,7 +402,17 @@ static int paint_shell(void){
             add_text(xx+15,yy+15,menu_name(i),1,0x1c3968);
         }
     }
-    return (int64_t)oxp_call(22,(uint64_t)shell_frame,drawn)==0?0:-1;
+    if(frame_overflow)return -1; /* Do not submit a partial composition. */
+    unsigned layers=(layer_changed(0)?OXP_SHELL_MASK_BACKGROUND:0u) |
+                    (layer_changed(1)?OXP_SHELL_MASK_OVERLAY:0u);
+    /* Publish metadata first; if raster upload fails, the validated old
+     * command renderer remains an immediately usable fallback. */
+    if((int64_t)oxp_call(22,(uint64_t)shell_frame,drawn)!=0)return -1;
+    if(layers && publish_pixel_layers(layers))return -1;
+    for(unsigned i=0;i<drawn;++i)previous_frame[i]=shell_frame[i];
+    previous_count=drawn;previous_valid=1;
+    last_wallpaper_generation=wallpaper_generation;
+    return 0;
 }
 static void shell_menu(int on){
     menu_visible=on?1:0;
@@ -270,6 +466,21 @@ static void handle_key(const oxp_shell_event_t *e){
         }
         shell_menu(0);return;
     }
+    /* Windows-style window management: Win+Up maximizes; Win+Down
+       restores, or minimizes an already normal window. */
+    if((mods&KEYMOD_WIN) && (e->code==KEY_UP || e->code==KEY_DOWN)){
+        refresh_windows();
+        for(unsigned i=0;i<17u;++i)if(shell_windows[i].active){
+            if(e->code==KEY_UP && !shell_windows[i].maximized)
+                (void)oxp_call(23,OXP_SHELL_MAXIMIZE,i);
+            if(e->code==KEY_DOWN){
+                if(shell_windows[i].maximized)(void)oxp_call(23,OXP_SHELL_MAXIMIZE,i);
+                else (void)oxp_call(23,OXP_SHELL_TASK,i);
+            }
+            break;
+        }
+        return;
+    }
     if((mods&KEYMOD_ALT) && e->code==KEY_F4){
         (void)oxp_call(23,OXP_SHELL_CLOSE,0);shell_menu(0);return;
     }
@@ -303,16 +514,30 @@ static void handle_key(const oxp_shell_event_t *e){
 }
 static void handle_pointer(const oxp_shell_event_t *e){
     int32_t x=(int32_t)e->x,y=(int32_t)e->y;
-    if(e->flags==OXP_SHELL_POINTER_UP){drag_index=-1;return;}
+    if(e->flags==OXP_SHELL_POINTER_UP){drag_index=-1;resize_index=-1;return;}
     if(e->flags==OXP_SHELL_POINTER_DOWN){
-        refresh_windows();drag_index=-1;
+        refresh_windows();drag_index=-1;resize_index=-1;
         uint32_t best_z=0;
         for(unsigned i=0;i<17u;++i){
             const oxp_shell_window_t *w=&shell_windows[i];
-            if(!w->visible || w->minimized || w->width<60u)continue;
-            if(x<(int32_t)w->x || x>=(int32_t)(w->x+w->width-58u) ||
-               y<(int32_t)w->y || y>=(int32_t)(w->y+33u))continue;
-            if(drag_index<0 || w->z>=best_z){drag_index=(int32_t)i;best_z=w->z;}
+            if(!w->visible || w->minimized || w->maximized || w->width<90u)continue;
+            int32_t wx=(int32_t)w->x,wy=(int32_t)w->y;
+            int32_t right=(int32_t)(w->x+w->width),bottom=(int32_t)(w->y+w->height);
+            int corner=(x>=right-18 && x<right && y>=bottom-18 && y<bottom);
+            int caption=(x>=wx && x<right-84 && y>=wy && y<wy+33);
+            if(!corner && !caption)continue;
+            if((drag_index<0 && resize_index<0) || w->z>=best_z){
+                drag_index=caption?(int32_t)i:-1;
+                resize_index=corner?(int32_t)i:-1;
+                best_z=w->z;
+            }
+        }
+        if(resize_index>=0){
+            const oxp_shell_window_t *w=&shell_windows[resize_index];
+            drag_anchor_x=x;drag_anchor_y=y;
+            resize_start_w=(int32_t)w->width;
+            resize_start_h=(int32_t)w->height;
+            (void)oxp_call(23,OXP_SHELL_FOCUS,(uint64_t)resize_index);
         }
         if(drag_index>=0){
             const oxp_shell_window_t *w=&shell_windows[drag_index];
@@ -322,7 +547,25 @@ static void handle_pointer(const oxp_shell_event_t *e){
         }
         return;
     }
-    if(drag_index<0 || e->flags!=OXP_SHELL_POINTER_MOVE)return;
+    if(e->flags!=OXP_SHELL_POINTER_MOVE)return;
+    if(resize_index>=0){
+        const oxp_shell_window_t *w=&shell_windows[resize_index];
+        int32_t ww=resize_start_w+x-drag_anchor_x;
+        int32_t hh=resize_start_h+y-drag_anchor_y;
+        int32_t minw=resize_index>=14?240:340,minh=resize_index>=14?190:280;
+        if(resize_index==4){minw=270;minh=310;}
+        if(resize_index==11){minw=340;minh=190;}
+        if(resize_index==2){minw=340;minh=235;}
+        if(ww<minw)ww=minw;if(hh<minh)hh=minh;
+        if(ww>(int32_t)(SHELL_W-w->x))ww=(int32_t)(SHELL_W-w->x);
+        if(hh>(int32_t)(SHELL_TASK_TOP-w->y))hh=(int32_t)(SHELL_TASK_TOP-w->y);
+        if(ww>0 && hh>0){
+            uint64_t dimensions=((uint64_t)(uint32_t)hh<<32)|(uint32_t)ww;
+            (void)oxp_call3(23,OXP_SHELL_RESIZE,(uint64_t)resize_index,dimensions);
+        }
+        return;
+    }
+    if(drag_index<0)return;
     const oxp_shell_window_t *w=&shell_windows[drag_index];
     int32_t nx=drag_start_x+x-drag_anchor_x;
     int32_t ny=drag_start_y+y-drag_anchor_y;
@@ -370,8 +613,12 @@ void oxp_main(void){
         shell_theme=preference.data[0];
         (void)oxp_call(23,OXP_SHELL_THEME,shell_theme);
     }
+    app_file_request_t wallpref={0};
+    oxp_copy(wallpref.path,"home/wallpaper.cfg",sizeof wallpref.path);
+    if(oxp_file(APP_FS_READ,&wallpref)==0 && wallpref.size==1 &&
+       wallpref.data[0]<32u)(void)apply_wallpaper(wallpref.data[0]);
     refresh_windows();
-    if(paint_shell())oxp_exit(2);
+    if(paint_shell() || publish_native_scene())oxp_exit(2);
     uint64_t refresh=oxp_ticks();
     for(;;){
         int work=accept_pending();
@@ -387,7 +634,7 @@ void oxp_main(void){
             ++work;
         }
         if(work || oxp_ticks()-refresh>=25u){
-            if(paint_shell())break;
+            if(paint_shell() || publish_native_scene())break;
             refresh=oxp_ticks();
         }
         if(!work && oxp_ipc_wait_any(2)<0)break;

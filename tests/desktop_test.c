@@ -1,6 +1,7 @@
 #include "gui/desktop.h"
 #include "fs/ramfs.h"
 #include "gui/native.h"
+#include "gui/native_viewport.h"
 #include <assert.h>
 #include <stdio.h>
 static uint32_t image[640*480];
@@ -33,6 +34,68 @@ int main(void){
     static desktop_t d;
     desktop_init(&d,&f,(shell_services_t){.run=launch});
     assert(desktop_top_window(&d)==DESKTOP_ABOUT);
+    /* XP titlebar: maximize/restore, minimize and close are separate targets.
+       The usable desktop excludes the persistent bottom taskbar. */
+    desktop_window_t initial=d.windows[DESKTOP_ABOUT];
+    assert(desktop_shell_maximize(&d,DESKTOP_ABOUT));
+    assert(d.windows[DESKTOP_ABOUT].maximized);
+    assert(d.windows[DESKTOP_ABOUT].x==0 && d.windows[DESKTOP_ABOUT].y==0);
+    assert(d.windows[DESKTOP_ABOUT].w==640 && d.windows[DESKTOP_ABOUT].h==438);
+    assert(!desktop_shell_maximize(&d,DESKTOP_WINDOWS));
+    desktop_mouse(&d,640-70,12,true); /* Minimize: leftmost caption button */
+    assert(d.windows[DESKTOP_ABOUT].minimized && d.windows[DESKTOP_ABOUT].maximized);
+    desktop_mouse(&d,640-70,12,false);
+    assert(desktop_shell_focus(&d,DESKTOP_ABOUT));
+    desktop_mouse(&d,640-44,12,true); /* Restore: middle caption button */
+    assert(!d.windows[DESKTOP_ABOUT].maximized);
+    assert(d.windows[DESKTOP_ABOUT].x==initial.x &&
+           d.windows[DESKTOP_ABOUT].y==initial.y &&
+           d.windows[DESKTOP_ABOUT].w==initial.w &&
+           d.windows[DESKTOP_ABOUT].h==initial.h);
+    desktop_mouse(&d,640-44,12,false);
+    /* The keyboard has the same semantics as titlebar controls. */
+    input_event_t key_max={.kind=INPUT_KEY,.code=KEY_UP,.modifiers=KEYMOD_WIN};
+    desktop_key_event(&d,&key_max);
+    assert(d.windows[DESKTOP_ABOUT].maximized);
+    key_max.code=KEY_DOWN;
+    desktop_key_event(&d,&key_max);
+    assert(!d.windows[DESKTOP_ABOUT].maximized);
+    /* Closed maximized windows reopen at their original size. */
+    assert(desktop_shell_maximize(&d,DESKTOP_ABOUT));
+    assert(desktop_shell_close(&d));
+    assert(!d.windows[DESKTOP_ABOUT].open);
+    assert(desktop_shell_focus(&d,DESKTOP_TERMINAL));
+    assert(desktop_shell_open(&d,DESKTOP_ABOUT));
+    assert(!d.windows[DESKTOP_ABOUT].maximized);
+    assert(d.windows[DESKTOP_ABOUT].w==initial.w);
+    /* Large native application windows also use the common geometry path. */
+    native_reset();
+    assert(native_open(800,"Large native",12));
+    desktop_native_show(&d,0,true);
+    assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
+    assert(d.windows[DESKTOP_NATIVE].w==640);
+    assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
+    assert(d.windows[DESKTOP_NATIVE].w==470);
+    assert(desktop_shell_resize(&d,DESKTOP_NATIVE,400u,250u));
+    assert(d.windows[DESKTOP_NATIVE].w==400 && d.windows[DESKTOP_NATIVE].h==250);
+    assert(!desktop_shell_resize(&d,DESKTOP_NATIVE,100u,80u));
+    assert(!desktop_shell_resize(&d,DESKTOP_NATIVE,UINT32_MAX,300u));
+    assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
+    assert(!desktop_shell_resize(&d,DESKTOP_NATIVE,350u,230u));
+    assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
+    assert(d.windows[DESKTOP_NATIVE].w==400 && d.windows[DESKTOP_NATIVE].h==250);
+    /* The compositor fallback can resize from the grip without windowd. */
+    int rx=d.windows[DESKTOP_NATIVE].x+d.windows[DESKTOP_NATIVE].w-9;
+    int ry=d.windows[DESKTOP_NATIVE].y+d.windows[DESKTOP_NATIVE].h-9;
+    desktop_mouse(&d,rx,ry,true);
+    assert(d.resizing);
+    desktop_mouse(&d,rx+12,ry+14,true);
+    assert(d.windows[DESKTOP_NATIVE].w==412 && d.windows[DESKTOP_NATIVE].h==264);
+    desktop_mouse(&d,rx+12,ry+14,false);
+    assert(!d.resizing);
+    native_owner_exit(800);
+    desktop_native_show(&d,0,false);
+
     assert(desktop_shell_move(&d,DESKTOP_ABOUT,20,30));
     assert(d.windows[DESKTOP_ABOUT].x==20 && d.windows[DESKTOP_ABOUT].y==30);
     assert(!desktop_shell_move(&d,DESKTOP_ABOUT,UINT32_MAX,0));
@@ -432,6 +495,11 @@ int main(void){
     for(unsigned slot=0;slot<NATIVE_MAX_WINDOWS;++slot)
         desktop_native_show(&fast,slot,true);
     assert(desktop_top_window(&fast)==DESKTOP_NATIVE3);
+    for(unsigned slot=0;slot<NATIVE_MAX_WINDOWS;++slot){
+        unsigned expected=(unsigned)(90+slot);
+        assert(native_next_event(expected)==NATIVE_EVENT_RESIZE);
+        assert(native_next_event(expected)==0);
+    }
     ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_CHARACTER,.key='A'};
     desktop_key_event(&fast,&ev);
     assert(native_next_event(92)=='A');
@@ -443,7 +511,10 @@ int main(void){
     desktop_mouse(&fast,mx,my,true);desktop_mouse(&fast,mx,my,false);
     uint32_t click=native_next_event(91);
     assert((click&NATIVE_EVENT_CLICK)==NATIVE_EVENT_CLICK);
-    assert(((click>>10)&1023u)==25u && (click&1023u)==60u);
+    uint32_t cx=25u,cy=60u;
+    oxp_native_pointer_to_canvas(cx,cy,(unsigned)fast.windows[DESKTOP_NATIVE2].w,
+                                 (unsigned)fast.windows[DESKTOP_NATIVE2].h,&cx,&cy);
+    assert(((click>>10)&1023u)==cx && (click&1023u)==cy);
     assert(native_next_event(90)==0 && native_next_event(92)==0);
     ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_UP};
     desktop_key_event(&fast,&ev);
@@ -454,7 +525,7 @@ int main(void){
     desktop_right_mouse(&fast,mx,my,true);
     uint32_t right=native_next_event(91);
     assert((right&NATIVE_EVENT_RIGHT_CLICK)==NATIVE_EVENT_RIGHT_CLICK);
-    assert(((right>>10)&1023u)==25u && (right&1023u)==60u);
+    assert(((right>>10)&1023u)==cx && (right&1023u)==cy);
     desktop_right_mouse(&fast,mx,my,false);
     assert(native_next_event(90)==0 && native_next_event(92)==0);
     native_owner_exit(91);desktop_native_show(&fast,1,false);

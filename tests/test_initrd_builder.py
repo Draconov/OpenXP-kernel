@@ -5,6 +5,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 from mkinitrd import elf_from_flat, elf_from_native_flat, pack_archive
+from check_windowd_bss import check_map
 
 
 class BuilderTests(unittest.TestCase):
@@ -22,6 +23,13 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(image[124:128],"little"),6)
         self.assertEqual(int.from_bytes(image[136:144],"little"),0x102000)
         self.assertEqual(len(image),176+6500)
+
+    def test_large_window_service_data_segment(self):
+        image = elf_from_native_flat(bytes(5000), 512 * 1024)
+        self.assertEqual(int.from_bytes(image[160:168], "little"), 512 * 1024)
+        self.assertEqual(check_map("104000 104000 59270 16 .bss\n"), 0x59270)
+        with self.assertRaises(ValueError):
+            check_map("104000 104000 80001 16 .bss\n")
 
     def test_archive_sort_order(self):
         blob = pack_archive([("bin/z", b"ZZ"), ("bin/a", b"AA")])

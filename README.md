@@ -46,15 +46,17 @@ make smoke-deep     # Additional kernel and user-mode diagnostics
 make smoke-native   # Native GUI/RAM ABI probe in Ring 3
 make smoke-window-ipc # Ring 3 window service and compositor bridge test
 make smoke-shell      # Confirm the Ring 3 desktop/taskbar policy service starts
+make smoke-raster     # Verify complete Ring 3 pixel layers are submitted
 ```
 
 The trusted `bin/windowd` Ring 3 process now starts automatically on normal
 boot, owns Start-menu/taskbar drawing commands, global keyboard shortcuts,
 focus and title-bar drag policy, desktop icon layout, and IPC window requests.
-Ring 3 submits separate background and foreground drawing layers; the kernel
-validates commands and paints pixels. The legacy desktop is restored if the
-service exits or stops refreshing its frame. **Final window rasterization and several older application UIs still execute
-in Ring 0.** Calculator, Notepad, Calendar, Mines and Snake now prefer separately compiled
+Ring 3 rasterizes wallpaper, icons, taskbar and Start-menu drawing into
+RGB565 scanlines. The kernel validates, stages and publishes complete layers
+before blitting pixels to the framebuffer. The legacy desktop is restored if the
+service exits or stops refreshing its frame. **Application window composition and several older application UIs still
+execute in Ring 0.** Calculator, Notepad, Calendar, Mines and Snake now prefer separately compiled
 Ring 3 ELF programs from Start, falling back to legacy windows when a native
 process cannot launch. Clock, System Monitor and About have experimental native
 binaries that can be tried through `RUN BIN/NAME` without replacing their
@@ -139,6 +141,26 @@ For supported VM settings and optical-drive controls, see the
 
 </details>
 
+## Managing windows
+
+All desktop application windows have three controls in their title bars:
+**Minimize**, **Maximize/Restore**, and **Close** (left to right).
+Maximizing expands a window to the screen area above the taskbar. Press its
+middle button again to restore its previous position and dimensions.
+A maximized window can be minimized without losing its saved layout.
+Keyboard shortcuts: **Win+Up** maximizes the active window; **Win+Down**
+restores it (or minimizes it when already restored).
+
+Native windows now reflow on resize/maximize/restore: their protected 320×180
+pixel buffers display a dynamically sized logical canvas that fills the window
+client area without letterboxing. The native SDK exposes the logical width
+and height and receives `OXP_RESIZE` events; editor rows, buttons, palettes,
+file lists, game grids, and input hit areas follow the new geometry.
+Pixel data stays RGB565 and is sampled with nearest-neighbour scaling. Very
+extreme narrow/tall proportions still have limited usable logical space.
+These features are source-level and host-tested; behavior in VirtualBox needs
+a fresh ISO validation.
+
 ## Native application experiments
 
 OpenXP also bundles separate Ring 3 ELF64 applications. Open **Run** or
@@ -165,6 +187,22 @@ The new native apps are still not fully feature-equivalent to the legacy ones.
 Use `RUN BIN/WINCLIENT` to exercise IPC-managed native window creation,
 movement, focus and closure. The kernel remains the final renderer and the
 legacy desktop is the fallback. See [IPC](docs/IPC.md).
+
+## Files and bundled applications
+
+Open **My Computer** to browse an XP-style `C:\` drive with `Windows`,
+`System Apps`, `Program Files`, `Documents and Settings`, user document folders,
+and `Windows\Web\Wallpaper`. The native File Manager supports folder
+navigation and launching `.exe`-named **OpenXP ELF64** applications.
+
+The `assets/wallpapers/` folder contains original sample BMP images and is
+scanned automatically when building the kernel. Add more uncompressed 24-bit
+BMP files there to bundle them into the ISO. Wallpaper selection is not yet
+connected to the desktop renderer.
+
+See [Filesystem and wallpapers](docs/FILESYSTEM.md) for paths, limits, and
+instructions. This is a virtual filesystem, **not NTFS, a Windows installation,
+or support for external Windows `.exe` binaries**.
 
 ## Explore the desktop
 
@@ -280,14 +318,38 @@ See [Process IPC](docs/IPC.md) for security and verification limits.
 | Guide | Contents |
 | --- | --- |
 | [Process IPC](docs/IPC.md) | Process-owned handles, message transport, Ring 3 server prototype |
+| [Filesystem and wallpapers](docs/FILESYSTEM.md) | XP-style directories, native `.exe` aliases and custom BMP assets |
 | [Architecture](docs/ARCHITECTURE.md) | Kernel design, boot sequence, memory and scheduling |
 | [Desktop and input](docs/DESKTOP.md) | Controls, rendering, shell and limitations |
 | [Userspace](docs/USERSPACE.md) | ELF loader, process model and system calls |
 | [Experimental storage](docs/STORAGE.md) | Dedicated IDE disk test and safety rules |
 | [Roadmap](docs/ROADMAP.md) | Planned work, priorities and verification goals |
+| [Compositor](docs/COMPOSITOR.md) | Ring 3 stacking policy, fallback and VM checks |
 | [VFS foundation](docs/VFS.md) | Read-only boot files, writable HOME namespace, and limitations |
+
+
+## Graphical composition boundary
+
+The Ring 3 `windowd` service chooses the ordering of windows through bounded
+`COMPOSE_BEGIN`/`COMPOSE_WINDOW` display-list commands. The kernel validates
+indices, uses kernel-owned framebuffer/surface data and falls back to legacy
+window ordering when `windowd` is absent or unhealthy.
+
+This is **not a full Ring 3 renderer**: rendering of old built-in application
+contents, native-surface blitting and physical scanout still live in Ring 0.
+Legacy applications remain until VM behavior and native feature parity are
+verified. The ongoing migration is tracked in [the roadmap](docs/ROADMAP.md).
 
 ## License
 
 OpenXP source code is licensed under [MIT](LICENSE). Limine and any other
 third-party dependencies retain their own licenses.
+
+### Native window rendering
+
+Native applications now have an experimental Ring 3 window composition path:
+`windowd` builds native window chrome and content into a private RGB565 scene
+using read-only snapshots of their separate drawing surfaces. The kernel
+validates scanlines and transfers the completed scene to the framebuffer.
+The original desktop renderer remains a fallback, and VirtualBox parity
+is not yet confirmed. See [Compositor](docs/COMPOSITOR.md).

@@ -1,4 +1,5 @@
 #include "user/syscall.h"
+#include "user/shell_abi.h"
 #include "user/app_file.h"
 #include "user/app_launch.h"
 #include "arch/x86_64/rtc.h"
@@ -97,6 +98,13 @@ int main(void) {
     f.rdi = 1000;f.rsi = 5;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == 0 && native_snapshot().active);
+    f.rax=OPENXP_SYS_GUI_CANVAS_SIZE;
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && r.result==((uint64_t)320<<32|180u));
+    native_set_window_size(0,1024u,726u);
+    r=user_syscall_dispatch(&f);
+    assert(!r.exit && (unsigned)(r.result>>32)<320u && (unsigned)r.result==180u);
+    assert(native_next_event(17)==NATIVE_EVENT_RESIZE);
     f.rax = OPENXP_SYS_GUI_TEXT;
     f.rsi = 22;
     r = user_syscall_dispatch(&f);
@@ -194,9 +202,61 @@ int main(void) {
         r=user_syscall_dispatch(&f);
         assert(!r.exit && r.result==(uint64_t)-OPENXP_EPERM);
     }
+    f.rax=OPENXP_SYS_SHELL_RASTER_ROW;
+    f.rdi=1000;f.rsi=sizeof(oxp_shell_raster_row_t);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rax=OPENXP_SYS_SHELL_RASTER_COMMIT;
+    f.rdi=OXP_SHELL_MASK_BACKGROUND;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rax=OPENXP_SYS_NATIVE_INFO;
+    f.rdi=0;f.rsi=2000;f.rdx=sizeof(oxp_native_info_t);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
+    f.rax=OPENXP_SYS_NATIVE_ROW;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EPERM);
     f.rax=OPENXP_SYS_WM_DISPLAY;
     capipc_init();
     assert(capipc_grant_server(17) && capipc_listen(17)==CAPIPC_OK);
+    /* The service is authorized but must still pass a valid, readable
+     * 2056-byte scanline. An unprivileged or forged pointer never works. */
+    f.rax=OPENXP_SYS_SHELL_RASTER_ROW;
+    f.rdi=1000;f.rsi=sizeof(oxp_shell_raster_row_t);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rax=OPENXP_SYS_SHELL_RASTER_COMMIT;
+    f.rdi=OXP_SHELL_MASK_BACKGROUND;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rax=OPENXP_SYS_NATIVE_INFO;
+    f.rdi=4;f.rsi=2000;f.rdx=sizeof(oxp_native_info_t);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rdi=0;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0);
+    oxp_native_info_t info;
+    memcpy(&info,&mock_file,sizeof(info));
+    assert(info.active==1 && info.generation!=0);
+    f.rax=OPENXP_SYS_NATIVE_ROW;
+    f.rdx=0;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL); /* not painted yet */
+    native_draw_cmd_t sample={.op=NATIVE_DRAW_CLEAR,.color=0x00ff00};
+    assert(native_draw(17,&sample,1));
+    f.rax=OPENXP_SYS_NATIVE_ROW;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0);
+    oxp_native_row_t row;
+    memcpy(&row,&mock_file,sizeof(row));
+    assert(row.slot==0 && row.y==0 && row.pixels[0]==0x07e0u);
+    f.rdx=OXP_NATIVE_H;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rax=OPENXP_SYS_WM_DISPLAY;
+    f.rsi=1000;
     uint64_t client_handle=0,server_handle=0;
     assert(capipc_connect(18,&client_handle)==CAPIPC_OK);
     assert(capipc_accept(17,&server_handle)==CAPIPC_OK);

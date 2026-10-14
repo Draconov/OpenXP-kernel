@@ -119,6 +119,24 @@ preemption, protection or hardware input are correct.
 - [ ] Add standard buttons/widgets, per-application resizing, menus and
       scrollbars. **Partial:** Calculator draws its own buttons and handles
       client mouse events, but no shared widget toolkit exists.
+- [x] Add Ring 3 **composition-order display commands**: windowd supplies a
+      validated back-to-front list of window IDs, in addition to wallpaper,
+      desktop icons, menus and taskbar. The privileged renderer uses this list
+      for legacy and PID-owned native surfaces; an absent/hung windowd restores
+      kernel composition ordering. Compilation/host-tested; VM pending.
+- [x] Add bounded RGB565 userspace-rasterized wallpaper and shell overlay
+      layers: `windowd` generates pixels and submits complete scanlines with
+      capability-gated syscalls. The kernel atomically publishes layer banks,
+      performs final blits and retains legacy fallback. Host tests passed;
+      new `make smoke-raster` QEMU integration has not been run locally.
+- [ ] Verify pixel-rasterized shell input responsiveness, Start/taskbar
+      drawing, repeated resize/move/focus, and process crash recovery in QEMU
+      and VirtualBox; the new boot marker confirms upload, not visible output.
+- [ ] Remove the final window-rasterization dependency on Ring 0. The compositor
+      still paints legacy app contents in kernel mode, and physically blits
+      native per-process surfaces. Ring 3 currently owns *policy*, not pixel
+      mapping. Require successful VM interaction and feature-parity testing
+      before deleting the old controllers.
 - [ ] Move the entire graphical compositor and legacy application controllers to
       Ring 3. **Partial:** a persistent `bin/windowd` owns shell policy,
       wallpaper and desktop-icon layout, Start/taskbar controls, title-bar
@@ -149,6 +167,19 @@ preemption, protection or hardware input are correct.
       and separate on-disk executable loading rather than embedded files.
 
 ## Filesystems, storage and terminal
+
+- [x] Define an XP-style virtual drive tree including Windows, System32,
+      Program Files, System Apps, Documents and Settings, and user folders;
+      validate direct-child directory enumeration in host tests.
+- [x] Present allowlisted OpenXP ELF64 apps as read-only `.exe` aliases in the
+      filesystem, without duplicating executable bytes or accepting Windows PE.
+- [x] Bundle original 24-bit BMP wallpapers from `assets/wallpapers/` into
+      `Windows/Web/Wallpaper` at build time.
+- [ ] Decode and select BMP wallpaper images in the Ring 3 compositor and
+      expose that choice through Appearance Settings.
+- [ ] Replace placeholder directories with real writable, persistent folders;
+      implement user profiles, a file installer, extensions and associations.
+
 
 - [x] Mount a validated, read-only `OXRD` boot archive.
 - [x] Implement a bounded writable RAM filesystem and Save/Open for Notepad,
@@ -191,7 +222,13 @@ preemption, protection or hardware input are correct.
       polling fallback. **Partial:** full compositor/frame pacing is absent.
 - [x] Add kernel-hosted utilities and games (Notepad, Calculator, Paint,
       WordPad, Calendar, Snake, Mines and others).
+- [x] Add a bounded RAM backbuffer for coherent desktop presentation,
+      revision checks against concurrent Ring 3 commits, and clipped window,
+      taskbar and active-window repainting. Host and sanitizer tests pass;
+      flicker reduction still requires VM confirmation.
 - [ ] Complete repaint clipping, resize behavior, scaling and tearing control.
+      **Partial:** buffered composition is implemented for framebuffer modes
+      up to 1024×768, but hardware vsync, larger modes and GPU scanout remain open.
 - [ ] Expand keyboard layouts and localization, key repeat and high-resolution
       pointer handling.
 - [x] Add read-only legacy PCI configuration-space discovery, bridge
@@ -288,3 +325,58 @@ it is **not** a claim that the entire operating system is finished.
       true directories, asynchronous process handles, and persistent storage.
 - [ ] Verify the new syscall execution and native app interaction in QEMU
       and VirtualBox before claiming working interactive migration.
+
+## Window composition ordering — latest pass
+
+- [x] Submit back-to-front window IDs from Ring 3 `windowd` as a bounded
+      composition display list (including the zero-window case).
+- [x] Reject duplicate, out-of-range and improperly ordered drawing commands
+      without replacing the last accepted scene; compare unchanged frames to
+      avoid redundant full-screen repainting.
+- [x] Make title-bar pointer selection agree with the submitted window order.
+- [x] Preserve the legacy compositor on service exit, heartbeat timeout or
+      when no valid Ring 3 plan exists.
+- [x] Pixel-level host integration verifies changing composition order changes
+      real framebuffer output and the fallback continues rendering.
+- [ ] Pass `make smoke-compositor` in QEMU and inspect the desktop, overlapping
+      windows and mouse focus in VirtualBox. Host tests cannot prove this.
+- [ ] Move window pixel composition itself out of Ring 0 and finish native
+      feature parity for all application controllers; only then retire the
+      kernel-hosted implementations, individually after VM regression tests.
+
+See [the compositor boundary](COMPOSITOR.md) for the protocol and release gate.
+
+### Native window rasterization checkpoint
+
+- [x] User-space native-window chrome and RGB565 content composition (host-tested).
+- [x] Service-only read-only native surface snapshots, bounded scanline transport.
+- [x] Atomic publication of a separately composed native-window raster layer.
+- [x] Kernel-native fallback when the Ring 3 service fails.
+- [ ] Verify native composition on QEMU and VirtualBox, including overlapped windows.
+- [ ] Integrate legacy and native windows into one globally ordered userspace scene.
+- [ ] Move legacy program rendering and controllers to Ring 3; remove Ring 0 copies only after parity and recovery checks.
+
+## Explorer, file types and desktop pictures
+
+- [x] Create browseable XP-inspired C: system folders and verified ELF64 `.exe` aliases (host tests).
+- [x] Add Ring 3 Explorer navigation, address/path display, a shortcuts sidebar, color-coded file icons, and a right-click action menu (source build; VM test pending).
+- [x] Add extension-based opening for text/configuration files and `.oxp` drawings, with kernel-enforced allowlisted executable launches (host-tested classification; VM test pending).
+- [x] Add validated, bounded OXRD range reads for BMP images, a Ring 3 decoder with RGB565 scaling, and icon-safe wallpaper composition (host tests and sanitizer tests).
+- [x] Connect bundled wallpaper selection in native Display Properties and Explorer to the Ring 3 `windowd` compositor; persist selection in RAM across service restarts (source implementation; VM test pending).
+- [ ] Verify image selection, different image sizes, all associated Open actions, Explorer context operations, and compositor stability in VirtualBox and QEMU.
+- [ ] Add file thumbnails, user-managed icon themes, editable associations, persistent preferences, a real disk-backed filesystem and a richer resizable Explorer layout.
+
+## Window maximize and restore
+
+- [x] Add a maximize/restore button between Minimize and Close on both
+      native Ring 3 and legacy window title bars. Save normal window geometry;
+      reserve the taskbar; restore normal bounds without losing position.
+- [x] Support Win+Up and Win+Down in the userspace shell and fallback desktop.
+      Prevent maximized windows from entering title-bar drag mode.
+- [x] Cover maximize/restore and title-bar chrome in focused host tests.
+- [ ] Confirm native and legacy maximize, restore, minimize, taskbar behavior,
+      and pixel refresh on the latest ISO in VirtualBox.
+- [x] Add owner-scoped logical canvas-size query and resize notifications;
+      reflow built-in native controls/editors and match hit tests to rendering
+      (host-tested). Full VM visual verification and higher-resolution native
+      surfaces remain for a later pass.

@@ -1,4 +1,5 @@
 #include "gui/native.h"
+#include "gui/native_viewport.h"
 #include "user/wm_display.h"
 #include "video/fb.h"
 #if !defined(OPENXP_NATIVE_HOST_TEST) || defined(OPENXP_NATIVE_WAIT_HOST_TEST)
@@ -14,9 +15,14 @@ static bool dirty_any;
 static uint16_t pixels[NATIVE_MAX_WINDOWS][NATIVE_SURFACE_W * NATIVE_SURFACE_H];
 static bool painted[NATIVE_MAX_WINDOWS];
 static uint32_t wm_serial_counter;
+static uint32_t content_serial;
 #ifdef OPENXP_CAPIPC_SELFTEST
 static native_wm_test_counts_t wm_test_counts;
 #endif
+static uint32_t content_version(void) {
+    if (++content_serial == 0) ++content_serial;
+    return content_serial;
+}
 static uint32_t next_wm_serial(void){
     ++wm_serial_counter;
     if(!wm_serial_counter)++wm_serial_counter;
@@ -85,6 +91,8 @@ bool native_open(uint64_t pid,const char *title,size_t n){
     /* Reopening an existing PID must not strand its event waiter. */
     wake_thread(w->waiter);
     *w=(native_window_t){0};w->active=true;w->owner=pid;w->dirty=true;
+    w->content_generation=content_version();
+    w->canvas_w=NATIVE_SURFACE_W;w->canvas_h=NATIVE_SURFACE_H;
     for(size_t i=0;i<n;++i)w->title[i]=title[i];
     /* A recycled PID slot must never expose the previous owner's pixels,
      * even if the new owner only paints a small rectangle. */
@@ -106,6 +114,7 @@ bool native_set_text(uint64_t pid,const char *text,size_t n){
     native_window_t *w=&windows[slot];
     for(size_t i=0;i<n;++i)w->text[i]=text[i];
     w->text[n]=0;w->dirty=true;dirty_any=true;
+    w->content_generation=content_version();
     unlock_irq(flags);return true;
 }
 static uint32_t dequeue(native_window_t *w) {
@@ -173,6 +182,27 @@ void native_push_event_slot(unsigned slot,uint32_t event){
     unlock_irq(flags);
 }
 void native_close_request_slot(unsigned slot){native_push_event_slot(slot,NATIVE_EVENT_CLOSE);}
+/* Trusted desktop geometry only: never accept an app-supplied size. */
+void native_set_window_size(unsigned slot,unsigned width,unsigned height){
+    if(slot>=NATIVE_MAX_WINDOWS)return;
+    oxp_native_canvas_t c=oxp_native_canvas(width,height);
+    uint64_t flags=lock_irq();
+    native_window_t *w=&windows[slot];
+    if(w->active && (w->canvas_w!=c.w || w->canvas_h!=c.h)){
+        w->canvas_w=c.w;w->canvas_h=c.h;
+        /* Retain the last valid frame until the app repaints: clearing it
+         * on every grip movement would visibly flicker. Reopen clears it. */
+        w->dirty=true;dirty_any=true;
+        if(!w->closing){enqueue(w,NATIVE_EVENT_RESIZE);wake_thread(w->waiter);}
+    }
+    unlock_irq(flags);
+}
+uint64_t native_canvas_size(uint64_t pid){
+    uint64_t flags=lock_irq();int slot=find_owner(pid);
+    uint64_t result=slot<0?0:((uint64_t)windows[slot].canvas_w<<32)|windows[slot].canvas_h;
+    unlock_irq(flags);return result;
+}
+
 void native_owner_exit(uint64_t pid){
     uint64_t flags=lock_irq();
     int slot=find_owner(pid);
@@ -214,6 +244,7 @@ bool native_wm_manage(uint64_t client_pid, uint32_t action, uint32_t x, uint32_t
     else ++wm_test_counts.close;
 #endif
     w->dirty=true;dirty_any=true;
+    w->content_generation=content_version();
     unlock_irq(flags);
     return true;
 }
@@ -269,6 +300,7 @@ bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count) {
                 pixels[slot][row*NATIVE_SURFACE_W+col]=color;
     }
     painted[slot]=true;windows[slot].dirty=true;dirty_any=true;
+    windows[slot].content_generation=content_version();
     unlock_irq(flags);return true;
 }
 bool native_has_surface(unsigned slot) {

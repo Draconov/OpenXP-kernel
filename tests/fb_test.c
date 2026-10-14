@@ -30,5 +30,21 @@ int main(void){
     assert(area[2+0]==0x0000ff && area[2+1]==0xffffff);
     fb_rect(&s,0,0,1,1,0x778899);
     assert(area[2]==0x778899);
-    puts("PASS: framebuffer clipping, text, RGB and sentinels");
+    /* Differential scanout: static frames write zero device pixels; changing
+     * one interior pixel writes exactly one; clipping and pitch are safe. */
+    uint32_t desired[16*16];
+    for(int y=0;y<16;++y)for(int x=0;x<16;++x)
+        desired[y*16+x]=area[2+y*16+x];
+    assert(fb_present_changed(&s,desired,16,0,0,16,16)==0);
+    desired[5*16+6]^=0x00010000u;
+    assert(fb_present_changed(&s,desired,16,0,0,16,16)==1);
+    assert(area[2+5*16+6]==desired[5*16+6]);
+    desired[8*16+8]^=0x100u;
+    assert(fb_present_changed(&s,desired,16,-2147483647,8,2147483647,1)==0);
+    assert(fb_present_changed(&s,desired,16,8,8,1,1)==1);
+    assert(fb_present_changed(&s,desired,15,0,0,16,16)==0);
+    assert(fb_present_changed(&s,desired,16,0,0,16,16)==0);
+    assert(area[0]==0x76543210 && area[1]==0x76543210 &&
+           area[258]==0x76543210 && area[259]==0x76543210);
+    puts("PASS: framebuffer clipping, differential presentation, RGB and sentinels");
 }

@@ -9,17 +9,21 @@
 #include "gui/native.h"
 
 enum { DESKTOP_TERMINAL=0, DESKTOP_FILES=1, DESKTOP_ABOUT=2, DESKTOP_NOTEPAD=3, DESKTOP_CALCULATOR=4, DESKTOP_PAINT=5, DESKTOP_MONITOR=6, DESKTOP_SETTINGS=7, DESKTOP_MINES=8, DESKTOP_CLOCK=9, DESKTOP_SNAKE=10, DESKTOP_RUN=11, DESKTOP_WORDPAD=12, DESKTOP_CALENDAR=13, DESKTOP_NATIVE=14, DESKTOP_NATIVE2=15, DESKTOP_NATIVE3=16, DESKTOP_WINDOWS=17 };
-typedef struct { int x,y,w,h; bool open,minimized; } desktop_window_t;
+typedef struct {
+    int x,y,w,h;
+    bool open,minimized,maximized;
+    int restore_x,restore_y,restore_w,restore_h;
+} desktop_window_t;
 typedef struct {
     fb_surface_t *surface;
     desktop_window_t windows[DESKTOP_WINDOWS];
     uint32_t wm_seen_geometry[NATIVE_MAX_WINDOWS];
     uint32_t wm_seen_focus[NATIVE_MAX_WINDOWS];
     int order[DESKTOP_WINDOWS]; /* low to high: focused window last */
-    bool start_open,dragging,mouse_down,right_down,showing_desktop;
+    bool start_open,dragging,resizing,mouse_down,right_down,showing_desktop;
     bool saved_minimized[DESKTOP_WINDOWS];
     unsigned menu_selection;
-    int drag_window,last_x,last_y,mouse_x,mouse_y;
+    int drag_window,resize_window,last_x,last_y,mouse_x,mouse_y;
     int selected_file;
     char file_folder[48];
     char file_preview[512];
@@ -81,6 +85,8 @@ void desktop_shell_desktop(desktop_t *d);
 bool desktop_shell_task(desktop_t *d,uint32_t index);
 bool desktop_shell_focus(desktop_t *d,uint32_t index);
 bool desktop_shell_move(desktop_t *d,uint32_t index,uint32_t x,uint32_t y);
+bool desktop_shell_maximize(desktop_t *d,uint32_t index);
+bool desktop_shell_resize(desktop_t *d,uint32_t index,uint32_t width,uint32_t height);
 bool desktop_shell_launch_native(desktop_t *d,uint32_t index);
 const char *desktop_shell_title(desktop_t *d,uint32_t index);
 void desktop_native_show(desktop_t *d,unsigned slot,bool showing);

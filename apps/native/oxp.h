@@ -18,6 +18,7 @@ typedef struct { uint32_t op,x,y,w,h,color; } oxp_draw_cmd_t;
 #define OXP_DOWN 0x10004u
 #define OXP_LEFT 0x10005u
 #define OXP_RIGHT 0x10006u
+#define OXP_RESIZE 0x10007u
 static inline unsigned oxp_click_x(uint32_t e){return (e >> 10) & 1023u;}
 static inline unsigned oxp_click_y(uint32_t e){return e & 1023u;}
 static inline uint64_t oxp_call(uint64_t id,uint64_t a,uint64_t b) {
@@ -59,10 +60,21 @@ static inline int oxp_fill(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t 
     oxp_draw_cmd_t cmd={OXP_DRAW_FILL,x,y,w,h,color};
     return oxp_draw(&cmd,1);
 }
+/* Snapshot the trusted compositor's logical client size. Unmanaged old
+ * clients still receive the original 320x180 layout. */
+static inline uint64_t oxp_canvas_size(void){
+    uint64_t packed=oxp_call(33,0,0);
+    return packed?packed:((uint64_t)OXP_CANVAS_W<<32)|OXP_CANVAS_H;
+}
+static inline unsigned oxp_canvas_width(void){return (unsigned)(oxp_canvas_size()>>32);}
+static inline unsigned oxp_canvas_height(void){return (unsigned)oxp_canvas_size();}
+static inline unsigned oxp_min(unsigned a,unsigned b){return a<b?a:b;}
+static inline unsigned oxp_max(unsigned a,unsigned b){return a>b?a:b;}
 static inline int oxp_label(unsigned x,unsigned y,const char *text,unsigned scale,uint32_t color){
     oxp_draw_cmd_t cmd[24];size_t used=0;
     if(!text || scale<1 || scale>2)return -1;
-    for(;*text && x+5u*scale<=OXP_CANVAS_W; ++text,x+=6u*scale){
+    unsigned width=oxp_canvas_width();
+    for(;*text && x+5u*scale<=width; ++text,x+=6u*scale){
         if(*text==' ')continue;
         if(*text<32 || *text>126)continue;
         cmd[used++]=(oxp_draw_cmd_t){OXP_DRAW_GLYPH,x,y,(uint32_t)(unsigned char)*text,scale,color};
