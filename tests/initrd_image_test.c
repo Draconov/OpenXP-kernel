@@ -1,4 +1,5 @@
 #include "fs/initrd.h"
+#include "user/process_layout.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -8,10 +9,42 @@
 static uint16_t le16(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
+static uint32_t le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
 static uint64_t le64(const uint8_t *p) {
     uint64_t v = 0;
     for (unsigned i = 0; i < 8; ++i) v |= (uint64_t)p[i] << (i * 8);
     return v;
+}
+/* Regression for the Ring 3 desktop launch failure: native windowd's
+ * large RW mapping used to overlap the stack at the old 0x110000 offset.
+ * Verify the *actual packaged ELF images* against the kernel stack layout.
+ * A change to ELF size or stack placement must fail host-side CI, before the
+ * QEMU shell smoke test reaches its 15-second timeout. */
+static void verify_stack_disjoint(const uint8_t *data, size_t size) {
+    assert(size >= 64 && le16(data + 54) == 56);
+    uint16_t ph_count = le16(data + 56);
+    uint64_t ph_offset = le64(data + 32);
+    assert(ph_count && ph_count <= 16 && ph_offset <= size &&
+           (uint64_t)ph_count * 56 <= size - ph_offset);
+    const uint64_t stack_first = PROCESS_USER_STACK_GUARD_OFFSET;
+    const uint64_t stack_last = stack_first +
+        (PROCESS_USER_STACK_PAGES + 2u) * PROCESS_USER_PAGE_BYTES;
+    assert(stack_last <= PROCESS_USER_SLOT_BYTES);
+    for (unsigned i = 0; i < ph_count; ++i) {
+        const uint8_t *ph = data + ph_offset + i * 56u;
+        assert(le32(ph) == 1u); /* Only PT_LOAD programs are supported. */
+        uint64_t first = le64(ph + 16), bytes = le64(ph + 40);
+        assert(bytes && first < PROCESS_USER_SLOT_BYTES &&
+               bytes <= PROCESS_USER_SLOT_BYTES - first);
+        uint64_t last = first + bytes;
+        first &= ~(PROCESS_USER_PAGE_BYTES - 1u);
+        last = (last + PROCESS_USER_PAGE_BYTES - 1u) &
+               ~(PROCESS_USER_PAGE_BYTES - 1u);
+        assert(last <= stack_first || first >= stack_last);
+    }
 }
 static void verify_file(const char *path) {
     const uint8_t *data = NULL;
@@ -47,13 +80,26 @@ int main(int argc, char **argv) {
     verify_file("bin/hello");
     verify_file("bin/fault");
     char name[64];
-    for(size_t i=0;i<initrd_count();++i)assert(initrd_name_at(i,name,sizeof(name)));
+    /* Check every bundled executable, including programs added in future. */
+    for(size_t i=0;i<initrd_count();++i){
+        assert(initrd_name_at(i,name,sizeof(name)));
+        if(name[0]=='b' && name[1]=='i' && name[2]=='n' && name[3]=='/'){
+            const uint8_t *elf=NULL;
+            size_t elf_size=0;
+            assert(initrd_lookup(name, (const void **)&elf, &elf_size));
+            assert(elf_size>=64 && !memcmp(elf,"\177ELF",4));
+            verify_stack_disjoint(elf,elf_size);
+        }
+    }
     assert(!initrd_name_at(initrd_count(),name,sizeof(name)));
     verify_file("bin/calculator");
     verify_file("bin/clock");
     verify_file("bin/notepad");
     verify_file("bin/probe");
     verify_file("bin/canvas");
+    verify_file("bin/windowd");
+    verify_file("bin/winclient");
+    verify_file("bin/waitprobe");
     assert(initrd_count()>=22);
     verify_file("bin/calendar");
     verify_file("bin/snake");
@@ -79,6 +125,6 @@ int main(int argc, char **argv) {
            !memcmp(text,"OpenXP - Exp",12));
     initrd_unmount();
     free(data);
-    puts("PASS: built initrd contains nineteen ELF64 apps and desktop README");
+    puts("PASS: built initrd ELF64 apps, stack layout and desktop README");
     return 0;
 }

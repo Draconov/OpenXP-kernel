@@ -2,6 +2,7 @@
 #include "user/capipc.h"
 #include "user/userspace.h"
 #include "user/elf.h"
+#include "user/process_layout.h"
 #include "arch/x86_64/gdt.h"
 #include "arch/x86_64/irq_state.h"
 #include "sched/scheduler.h"
@@ -15,8 +16,8 @@
 #define PROCESS_STACK_GUARDS 2u
 #define PROCESS_STACK_STRIDE (PROCESS_STACK_PAGES + PROCESS_STACK_GUARDS)
 #define PROCESS_STACK_OFFSET (3ULL * 1024 * 1024)
-#define USER_STACK_PAGES 4u
-#define USER_STACK_OFFSET 0x110000ULL
+#define USER_STACK_PAGES PROCESS_USER_STACK_PAGES
+#define USER_STACK_OFFSET PROCESS_USER_STACK_GUARD_OFFSET
 
 struct process {
     process_info_t info;

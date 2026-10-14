@@ -20,9 +20,6 @@ extern const uint8_t openxp_user_preempt_start[], openxp_user_preempt_end[];
 extern void *memcpy(void *, const void *, size_t);
 
 #define CODE_OFFSET 0x100000ULL
-#define STACK_OFFSET 0x110000ULL
-#define STACK_PAGES 4u
-#define STACK_GUARD_PAGES 1u
 #define ELF_HEADER_BYTES 64u
 #define ELF_PH_BYTES 56u
 #define ELF_IMAGE_OFFSET (ELF_HEADER_BYTES + ELF_PH_BYTES)
