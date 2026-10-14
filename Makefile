@@ -58,11 +58,12 @@ $(BUILD)/apps/windowd.native.o: apps/native/native_scene.h
 $(BUILD)/apps/windowd.native.o: kernel/user/wm_display.h
 $(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h kernel/user/shell_abi.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -Ikernel -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -Ikernel -c $< -o $@
 $(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o apps/native/app.ld
+$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o apps/native/app.ld tools/check_windowd_pic.py
+	python3 tools/check_windowd_pic.py $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o -Map $(BUILD)/apps/windowd.map -o $@
 	python3 tools/check_windowd_bss.py $(BUILD)/apps/windowd.map
 # Inspect the *actual compiled object code*; changes to toolchain defaults
@@ -198,7 +199,7 @@ test-window-protocol-sanitize:
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
 	build/tests/wm_capipc_sanitized
 
-test-unit: test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
+test-unit: test-windowd-pic test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
 	build/tests/native_wait_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
@@ -429,3 +430,7 @@ test-native-text-layout-sanitize:
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_text_layout_test.c -o $(BUILD)/tests/native_text_layout_sanitized
 	$(BUILD)/tests/native_text_layout_sanitized
+
+.PHONY: test-windowd-pic
+test-windowd-pic:
+	python3 -m unittest discover -s tests -p "windowd_pic_test.py" -v

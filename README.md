@@ -353,3 +353,19 @@ using read-only snapshots of their separate drawing surfaces. The kernel
 validates scanlines and transfers the completed scene to the framebuffer.
 The original desktop renderer remains a fallback, and VirtualBox parity
 is not yet confirmed. See [Compositor](docs/COMPOSITOR.md).
+
+### Ring 3 PIC build check
+
+OpenXP currently wraps native flat files into relocation-free ET_DYN ELF images
+and maps them at a high user address. Every reference embedded in the native
+binary must therefore be position independent. In particular, compiling the
+shell rasterizer with `-fno-pic -fno-pie` produced absolute glyph/jump-table
+addresses around `0x104450`, causing a Ring 3 page fault after its initial
+SSE2 build bug had been fixed. It now uses `-fpie`, like other native C files.
+
+`tools/check_windowd_pic.py` checks all six C objects linked into `windowd`
+before the final flat-binary link and rejects absolute relocations. Run the
+related parser regression with `make test-windowd-pic`. This is an interim
+safeguard, not a replacement for proper loadable ELF images and relocation
+processing; native applications beyond `windowd` should receive a full
+relocation audit before being considered VM-validated.
