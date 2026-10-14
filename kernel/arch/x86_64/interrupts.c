@@ -77,7 +77,7 @@ __attribute__((noreturn)) void exception_dispatch(const struct exception_frame *
     /* Faults from CPL3 are confined to the one user task; supervisor faults
      * remain fatal and continue through the full kernel crash report. */
     if ((frame->cs & 3u) == 3u && userspace_active())
-        userspace_fault(frame->vector, cr2);
+        userspace_fault(frame->vector, cr2, frame->rip, frame->rsp);
     crash_report_exception(frame, cr2);
 #ifdef OPENXP_EXCEPTION_SELFTEST
     if (frame->vector == 6) serial_puts("OPENXP_EXCEPTION_OK\n");

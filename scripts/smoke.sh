@@ -9,6 +9,16 @@ LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
 code=0
 timeout 15s qemu-system-x86_64 -m 512M -cdrom "$ISO" -display none -serial "file:$LOG" -no-reboot -monitor none || code=$?
 cat "$LOG"
+# For failed shell/compositor boots show the actual function + offset when
+# the kernel reports a user RIP. This is diagnostic only: never turn a failed
+# boot into a successful test merely because a location could be resolved.
+case "$EXPECTED" in
+    OPENXP_RING3_SHELL_READY|OPENXP_RING3_COMPOSE_READY|OPENXP_RING3_RASTER_READY|OPENXP_RING3_NATIVE_PIXELS_READY)
+        if [[ -f build/apps/windowd.map ]] && grep -q 'USER EXCEPTION pid=1.*image_offset=' "$LOG"; then
+            python3 tools/resolve_ring3_fault.py "$LOG" build/apps/windowd.map || true
+        fi
+        ;;
+esac
 if [[ "$code" != 0 && "$code" != 124 ]]; then exit "$code"; fi
 if [[ "$EXPECTED" == OPENXP_BOOT_OK || "$EXPECTED" == OPENXP_NATIVE_ABI_OK || "$EXPECTED" == OPENXP_NATIVE_WAIT_OK || "$EXPECTED" == OPENXP_CAPIPC_OK || "$EXPECTED" == OPENXP_RING3_SHELL_READY || "$EXPECTED" == OPENXP_RING3_COMPOSE_READY || "$EXPECTED" == OPENXP_RING3_RASTER_READY || "$EXPECTED" == OPENXP_RING3_NATIVE_PIXELS_READY ]]; then
     REQUIRED=(OPENXP_GDT_OK OPENXP_IDT_OK OPENXP_PMM_OK OPENXP_VMM_OK OPENXP_HEAP_OK OPENXP_STACKS_OK OPENXP_BOOT_OK OPENXP_INPUT_OK OPENXP_GUI_OK OPENXP_SHELL_OK OPENXP_WM_OK "$EXPECTED")

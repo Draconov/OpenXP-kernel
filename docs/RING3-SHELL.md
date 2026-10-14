@@ -58,3 +58,23 @@ Snake, Calendar, settings, Terminal, and File Manager still run inside the
 kernel. Migrating these faithfully requires per-app ports, more than three
 native GUI windows, an event-driven GUI toolkit, and VM testing. Track these
 items in [Roadmap](ROADMAP.md) rather than treating the shell migration as complete.
+
+## Diagnosing a Ring 3 startup crash
+
+If the `smoke-shell` test reports `USER EXCEPTION pid=1 vector=6`, the CPU
+raised an invalid-opcode exception in the native window manager. For `#UD`,
+CR2 is **not** the offending address. OpenXP now reports the faulting `rip`,
+`rsp`, the linker-relative `image_offset`, and (if safely readable) the first
+eight opcode bytes. `scripts/smoke.sh` also annotates such crashes using the
+matching `build/apps/windowd.map` symbol map. Failure markers are still
+required: a diagnostic does not make a failing smoke test pass.
+
+The current flat native binary format has executable, read-only linked code
+and `.data`, plus a separate zero-filled read/write segment for `.bss`.
+Until initialized RW data is supported, mutable globals in `windowd` must be
+zero-initialized in `.bss` and assigned their desired values in `oxp_main`.
+`tools/check_windowd_bss.py` now rejects initialized `.data` in that service.
+
+**Important:** a successful host build or unit test is not evidence that the
+live window manager boots. Re-run `make smoke-shell` under QEMU and verify
+`OPENXP_RING3_SHELL_READY` before treating any startup defect as closed.

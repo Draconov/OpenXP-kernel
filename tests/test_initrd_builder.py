@@ -6,6 +6,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 from mkinitrd import elf_from_flat, elf_from_native_flat, pack_archive
 from check_windowd_bss import check_map
+from resolve_ring3_fault import resolve
 
 
 class BuilderTests(unittest.TestCase):
@@ -30,6 +31,16 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(check_map("104000 104000 59270 16 .bss\n"), 0x59270)
         with self.assertRaises(ValueError):
             check_map("104000 104000 80001 16 .bss\n")
+        with self.assertRaises(ValueError):
+            check_map("104000 104000 10 16 .data\n104000 104000 59270 16 .bss\n")
+
+    def test_fault_map_uses_real_ip_not_stale_cr2(self):
+        log = ("USER EXCEPTION pid=1 vector=6 rip=0x8000100020 "
+               "rsp=0x80003f4ff0 image_offset=0x0000000000100020\n")
+        linker_map = "10000c 10000c 14cb 1 oxp_main\n"
+        result = resolve(log, linker_map)
+        self.assertEqual(result, ["Ring 3 PID 1 vector 6: windowd!oxp_main+0x14 "
+                                  "(image offset 0x100020)"])
 
     def test_archive_sort_order(self):
         blob = pack_archive([("bin/z", b"ZZ"), ("bin/a", b"AA")])

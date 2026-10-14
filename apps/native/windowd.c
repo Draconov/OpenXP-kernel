@@ -278,8 +278,8 @@ static int publish_native_scene(void){
 
 static int menu_visible;
 static uint32_t menu_cursor;
-static int32_t drag_index=-1;
-static int32_t resize_index=-1;
+static int32_t drag_index;
+static int32_t resize_index;
 static int32_t resize_start_w,resize_start_h;
 static int32_t drag_anchor_x,drag_anchor_y,drag_start_x,drag_start_y;
 
@@ -601,6 +601,11 @@ static void handle_click(const oxp_shell_event_t *e){
     }
 }
 void oxp_main(void){
+    /* These are mutable service state, not constants: the native ELF packer
+     * currently maps .text/.rodata/.data read-only. Initialize explicitly
+     * in zero-filled RW memory rather than storing mutable data in RX pages. */
+    drag_index=-1;
+    resize_index=-1;
     wm_state_init(&state);
     if(oxp_listen()!=0)oxp_exit(1);
     /* windowd has no application window: it leaves all native slots for

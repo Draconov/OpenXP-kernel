@@ -67,10 +67,42 @@ static bool make_demo_elf(const uint8_t *start, const uint8_t *end,
 bool userspace_active(void) { return process_current_pid() != 0; }
 const address_space_t *userspace_current_space(void) { return process_current_space(); }
 void userspace_finish(uint64_t status) { process_finish(status); }
-__attribute__((noreturn)) void userspace_fault(uint64_t vector, uint64_t address) {
+/* CR2 describes the last page fault and is not meaningful for a #UD.
+ * Keep the existing fault-address accounting, but report the interrupted
+ * instruction and stack pointers so a native-app crash can be located in
+ * the packaged executable instead of misdiagnosed as a NULL pointer. */
+__attribute__((noreturn)) void userspace_fault(uint64_t vector, uint64_t address,
+                                              uint64_t rip, uint64_t rsp) {
     serial_puts("USER EXCEPTION pid="); serial_u64(process_current_pid());
     serial_puts(" vector="); serial_u64(vector);
-    serial_puts(" address="); serial_hex64(address); serial_puts("\n");
+    serial_puts(" rip="); serial_hex64(rip);
+    serial_puts(" rsp="); serial_hex64(rsp);
+    const uint64_t user_base = vmm_user_base();
+    if (user_base && rip >= user_base && rip - user_base < 4ULL * 1024 * 1024) {
+        serial_puts(" image_offset="); serial_hex64(rip - user_base);
+    }
+    if (vector == 14) {
+        serial_puts(" cr2="); serial_hex64(address);
+    }
+    serial_puts("\n");
+    /* Dump at most eight bytes of the faulting instruction. Read through the
+     * verified userspace-copy path; never dereference a potentially corrupt
+     * user RIP on the supervisor address space. */
+    if (vector == 6) {
+        const address_space_t *space = userspace_current_space();
+        uint8_t instruction[8];
+        if (space && aspace_copy_from_user(space, instruction, rip, sizeof(instruction))) {
+            static const char hex[] = "0123456789abcdef";
+            serial_puts("USER OPCODE bytes=");
+            for (unsigned i = 0; i < sizeof(instruction); ++i) {
+                serial_putc(hex[instruction[i] >> 4]);
+                serial_putc(hex[instruction[i] & 15u]);
+            }
+            serial_puts("\n");
+        } else {
+            serial_puts("USER OPCODE unavailable (unmapped RIP)\n");
+        }
+    }
     process_record_fault(vector, address);
     arch_user_return();
 }
