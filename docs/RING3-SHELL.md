@@ -75,6 +75,27 @@ Until initialized RW data is supported, mutable globals in `windowd` must be
 zero-initialized in `.bss` and assigned their desired values in `oxp_main`.
 `tools/check_windowd_bss.py` now rejects initialized `.data` in that service.
 
+## Ring 3 CPU instruction policy (October 2026)
+
+The 2026-10-14 `smoke-shell` failure was an invalid-opcode (`#UD`) at
+`windowd!oxp_raster_core+0x47` (`66 0f 6e c0`, `movd xmm0,eax`). The
+`apps/native/shell_raster.c` build rule previously omitted the no-SSE
+compiler flags used by most other Ring 3 programs; its optimized row-fill
+loop consequently contained XMM instructions. OpenXP does **not yet** enable
+and save/restore userspace SSE/FPU state across processes, so these instructions
+cannot safely execute.
+
+`Makefile` now gives **every Ring 3 C object** (including the runtime and
+rasterizer) one integer-register-only CPU policy. Before packing initrd,
+`tools/check_ring3_isa.py` disassembles every app object and refuses any
+SIMD/x87 instructions. `make kernel` and `make test-unit` exercise this guard;
+`tests/test_ring3_isa.py` verifies that it catches the fault opcode.
+
+This is an interim compatibility choice rather than full SSE support. When
+userspace floating-point/SIMD becomes necessary, add correct CR0/CR4 setup,
+feature detection and per-thread XMM/XSAVE save/restore **first**, then update
+the common Ring 3 instruction policy and its validation together.
+
 **Important:** a successful host build or unit test is not evidence that the
 live window manager boots. Re-run `make smoke-shell` under QEMU and verify
 `OPENXP_RING3_SHELL_READY` before treating any startup defect as closed.

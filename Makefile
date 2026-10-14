@@ -6,6 +6,9 @@ BUILD ?= build
 BOOTLOADER_DIR ?= build/limine
 LIMINE_BRANCH ?= v10.x-binary
 EXTRA_CFLAGS ?=
+# Ring 3 currently does not preserve XMM/MMX/x87 state during scheduling.
+# Treat all userspace C objects alike (including the rasterizer and runtime).
+RING3_CPU_FLAGS := -mno-red-zone -mgeneral-regs-only -mno-sse -mno-sse2 -mno-mmx -mno-80387
 CFLAGS := -target x86_64-unknown-none-elf -std=c11 -O2 -g -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mcmodel=kernel -Wall -Wextra -Werror -Ikernel -MMD -MP $(EXTRA_CFLAGS)
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T kernel/linker.ld
 C_SOURCES := kernel/main.c kernel/serial.c kernel/arch/x86_64/interrupts.c kernel/arch/x86_64/gdt.c kernel/arch/x86_64/timer.c kernel/arch/x86_64/irq_state.c kernel/arch/x86_64/rtc.c kernel/diag/crash.c kernel/mm/pmm.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/mm/heap.c kernel/sched/scheduler.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c kernel/fs/initrd.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/persist.c kernel/drivers/ata_ide.c kernel/drivers/pci.c kernel/shell/shell.c kernel/video/fb.c kernel/input/input.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/user/userspace.c kernel/user/process.c kernel/user/capipc.c kernel/user/app_launch.c kernel/user/elf.c kernel/user/syscall.c kernel/lib/string.c
@@ -30,36 +33,45 @@ $(BUILD)/apps/%.bin: $(BUILD)/apps/%.o
 	$(LD) -m elf_x86_64 --oformat binary -Ttext 0x100000 $< -o $@
 NATIVE_APPS := calculator clock notepad probe waitprobe canvas windowd winclient calendar snake mines monitor about paint wordpad terminal filemanager run settings
 NATIVE_BINS := $(addprefix $(BUILD)/apps/,$(addsuffix .bin,$(NATIVE_APPS)))
-$(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h apps/native/game_logic.h
+# Keep intermediate native objects so the whole Ring 3 ISA audit can be
+# rerun without recompiling or silently skipping application entry points.
+.SECONDARY: $(addprefix $(BUILD)/apps/,$(addsuffix .native.o,$(NATIVE_APPS)))
+$(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h apps/native/game_logic.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/apps/native_runtime.o: apps/native/runtime.c
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/native_runtime.o: apps/native/runtime.c Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -Wall -Wextra -Werror -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/native_start.o: apps/native/start.S
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -c $< -o $@
 $(BUILD)/apps/%.bin: $(BUILD)/apps/%.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o apps/native/app.ld
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $< $(BUILD)/apps/native_runtime.o -o $@
 $(BUILD)/apps/windowd.native.o $(BUILD)/apps/winclient.native.o: apps/native/wm_protocol.h
-$(BUILD)/apps/native_scene.o: apps/native/native_scene.c apps/native/native_scene.h apps/native/shell_raster.h
+$(BUILD)/apps/native_scene.o: apps/native/native_scene.c apps/native/native_scene.h apps/native/shell_raster.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/apps/wallpaper.o: apps/native/wallpaper.c apps/native/wallpaper.h
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/wallpaper.o: apps/native/wallpaper.c apps/native/wallpaper.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/windowd.native.o: apps/native/native_scene.h
 $(BUILD)/apps/windowd.native.o: kernel/user/wm_display.h
-$(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h kernel/user/shell_abi.h
+$(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h kernel/user/shell_abi.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -Wall -Wextra -Werror -Ikernel -c $< -o $@
-$(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -Ikernel -c $< -o $@
+$(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h Makefile
 	@mkdir -p $(dir $@)
-	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie -mno-red-zone -mno-sse -mno-sse2 -Wall -Wextra -Werror -c $< -o $@
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o apps/native/app.ld
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o -Map $(BUILD)/apps/windowd.map -o $@
 	python3 tools/check_windowd_bss.py $(BUILD)/apps/windowd.map
-$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) tools/mkinitrd.py $(wildcard assets/wallpapers/*.bmp)
+# Inspect the *actual compiled object code*; changes to toolchain defaults
+# must not silently reintroduce unsupported SIMD/FPU instructions.
+# The stamp is an initrd prerequisite, so every image build is protected.
+$(BUILD)/apps/.ring3-isa-ok: $(NATIVE_BINS) $(BUILD)/apps/hello.o $(BUILD)/apps/fault.o tools/check_ring3_isa.py
+	python3 tools/check_ring3_isa.py $(BUILD)/apps
+	@touch $@
+$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) $(BUILD)/apps/.ring3-isa-ok tools/mkinitrd.py $(wildcard assets/wallpapers/*.bmp)
 	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS)
 $(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
 $(BUILD)/openxp.elf: $(OBJECTS) kernel/linker.ld

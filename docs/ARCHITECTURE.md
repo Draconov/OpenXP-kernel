@@ -83,6 +83,8 @@ there is no SMP or TLB shootdown support.
 
 Interrupt masking here is a **single-CPU** critical-section mechanism, not a
 replacement for SMP locks. Floating-point/SIMD task-state saving is absent.
+All bundled Ring 3 C objects are therefore compiled for general-purpose
+registers only, with a disassembly-based build guard before initrd packaging.
 
 ## Files and applications
 
