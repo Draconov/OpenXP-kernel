@@ -122,7 +122,8 @@ All work that is **planned rather than implemented** is tracked in the
 ## New native rendering and optional hardware groundwork
 
 Native ELF64 programs can submit bounded pixel drawing batches through syscall
-11. Each process has its own kernel-managed 320×180 RGB565 backing surface.
+11. Each native process has its own kernel-managed RGB565 surface, with a
+maximum allocation of 640×360 and resize-dependent logical dimensions.
 The current Ring 0 desktop composes it into a clipped framebuffer window.
 The surface is not a shared writable user mapping and cannot be modified by a
 different PID. This is an intermediate architecture, **not a Ring 3 window

@@ -27,6 +27,21 @@ int main(void){
     assert(app_launch_submit("bin/filemanager"));
     assert(app_launch_take(out,sizeof out));
     assert(!strcmp(out,"bin/filemanager"));
+    app_launch_request_t queued={0};
+    assert(app_launch_submit_with_arg("bin/notepad","home/example.txt"));
+    assert(!app_launch_submit_with_arg("bin/paint","home/drawing.oxp"));
+    assert(app_launch_take_request(&queued));
+    assert(!strcmp(queued.executable,"bin/notepad"));
+    assert(!strcmp(queued.argument,"home/example.txt"));
+    assert(!app_launch_take_request(&queued));
+    assert(!app_launch_submit_with_arg("bin/notepad","home/../secret.txt"));
+    assert(!app_launch_submit_with_arg("bin/notepad","/etc/passwd"));
+    assert(!app_launch_submit_with_arg("bin/notepad","home/"));
+    assert(!app_launch_submit_with_arg("bin/notepad","home/foo\\bar"));
+    assert(!app_launch_submit_with_arg("bin/windowd","home/example.txt"));
+    assert(app_launch_submit("bin/paint"));
+    assert(app_launch_take_request(&queued));
+    assert(!queued.argument[0]);
     puts("PASS: isolated app launch allowlist, queue, consumption and reset");
     return 0;
 }

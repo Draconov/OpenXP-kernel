@@ -17,4 +17,16 @@ static inline int oxp_delete(char *text,size_t *length,size_t *cursor){
     for(size_t i=*cursor;i<*length;++i)text[i]=text[i+1];
     --*length;return 1;
 }
+/* Delete a selected half-open range safely, then place the caret at the
+ * beginning of the removed text. Handles empty selections as a no-op. */
+static inline int oxp_erase_span(char *text,size_t *length,size_t *cursor,
+                                 size_t anchor){
+    if(!text||!length||!cursor||*cursor>*length||anchor>*length)return 0;
+    size_t lo=anchor<*cursor?anchor:*cursor;
+    size_t hi=anchor>*cursor?anchor:*cursor;
+    if(lo==hi)return 0;
+    for(size_t i=lo;i+hi-lo<=*length;++i)text[i]=text[i+hi-lo];
+    *length-=hi-lo;*cursor=lo;
+    return 1;
+}
 #endif

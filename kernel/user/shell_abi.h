@@ -73,10 +73,10 @@ _Static_assert(sizeof(oxp_shell_window_t)==72,"window query wire ABI");
  * No kernel pointer, framebuffer mapping, or other process's address space
  * is made writable to the service. */
 #define OXP_NATIVE_SLOTS 3u
-#define OXP_NATIVE_W 320u
-#define OXP_NATIVE_H 180u
+#define OXP_NATIVE_W 640u
+#define OXP_NATIVE_H 360u
 typedef struct {
-    uint32_t active, painted, generation, reserved;
+    uint32_t active, painted, generation, surface_w, surface_h;
     char title[48];
     char text[384];
 } oxp_native_info_t;
@@ -84,5 +84,5 @@ typedef struct {
     uint32_t slot, y;
     uint16_t pixels[OXP_NATIVE_W];
 } oxp_native_row_t;
-_Static_assert(sizeof(oxp_native_row_t)==648,"native scanline ABI");
+_Static_assert(sizeof(oxp_native_row_t)==1288,"native scanline ABI");
 #endif

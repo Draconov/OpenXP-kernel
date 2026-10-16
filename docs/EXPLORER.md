@@ -6,11 +6,11 @@ native Display Properties app (`bin/settings`), and an XP-inspired virtual
 
 ## Explorer
 
-Open **My Computer** from Start or `WIN+E`. Its compact 320×180 native window
+Open **My Computer** from Start or `WIN+E`. Its responsive native window
 provides folder shortcuts, Back and Up navigation, an address display, colored
 file-type icons, selection highlighting and a five-action right-click menu.
-Click an item to select it; click it again or press Enter to open it. Up/Down
-scrolls the current list. The sidebar jumps to C:, My Documents, System Apps,
+Click an item to select it; click it again or press Enter to open it. Up/Down or the on-screen scrollbar
+scrolls the current list. Larger windows display more rows. The sidebar jumps to C:, My Documents, System Apps,
 Wallpapers, Program Files, or System32.
 
 The right-click menu offers **Open, Copy to HOME, Rename, Delete, Properties**.

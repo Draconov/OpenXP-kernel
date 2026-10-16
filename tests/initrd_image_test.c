@@ -37,6 +37,9 @@ static void verify_stack_disjoint(const uint8_t *data, size_t size) {
         const uint8_t *ph = data + ph_offset + i * 56u;
         assert(le32(ph) == 1u); /* Only PT_LOAD programs are supported. */
         uint64_t first = le64(ph + 16), bytes = le64(ph + 40);
+        /* The loader permits up to 2 MiB in one segment, and at most 768
+         * mapped pages across executable text and writable data. */
+        assert(bytes <= 2u * 1024u * 1024u);
         assert(bytes && first < PROCESS_USER_SLOT_BYTES &&
                bytes <= PROCESS_USER_SLOT_BYTES - first);
         uint64_t last = first + bytes;

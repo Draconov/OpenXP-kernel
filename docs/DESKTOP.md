@@ -205,8 +205,8 @@ native broker triggers a legacy fallback instead of silently failing.
 - `RUN BIN/MONITOR`: read-only uptime and available physical page count.
 - `RUN BIN/ABOUT`: informational window.
 
-These windows retain a bounded 320×180 RGB565 backing store, but a logical
-canvas sized from the current client aspect ratio now fills the window. Native
+These windows now have a bounded 640×360 RGB565 backing store and a logical
+canvas that expands with their size instead of always stretching 320×180. Native
 app drawing and pointer hit areas reflow after the `OXP_RESIZE` event. There
 is still no GPU acceleration. Native graphics and input require VM testing.
 

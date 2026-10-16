@@ -22,4 +22,21 @@ static inline void oxp_paint_put(uint8_t *pixels,unsigned x,unsigned y,unsigned 
     pixels[byte]=(uint8_t)word;
     if(shift>5u)pixels[byte+1]=(uint8_t)(word>>8u);
 }
+/* Inclusive 8-connected Bresenham segment. Calls a bounded plotter and
+ * includes both endpoints, so fast pointer motion cannot leave gaps. */
+typedef void (*oxp_paint_plot_fn)(unsigned x,unsigned y,void *context);
+static inline void oxp_paint_stroke(unsigned x0,unsigned y0,unsigned x1,unsigned y1,
+                                     oxp_paint_plot_fn plot,void *context){
+    if(x0>=OXP_PAINT_W||x1>=OXP_PAINT_W||y0>=OXP_PAINT_H||y1>=OXP_PAINT_H||!plot)return;
+    int x=(int)x0,y=(int)y0,tx=(int)x1,ty=(int)y1;
+    int dx=tx>x?tx-x:x-tx,dy=ty>y?ty-y:y-ty;
+    int sx=x<tx?1:-1,sy=y<ty?1:-1,err=dx-dy;
+    for(;;){
+        plot((unsigned)x,(unsigned)y,context);
+        if(x==tx&&y==ty)break;
+        int twice=err*2;
+        if(twice>-dy){err-=dy;x+=sx;}
+        if(twice<dx){err+=dx;y+=sy;}
+    }
+}
 #endif

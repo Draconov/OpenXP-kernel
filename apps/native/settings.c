@@ -1,9 +1,11 @@
 #include "oxp.h"
 #include "wm_protocol.h"
 #include "theme.h"
+#include "ui_widgets.h"
 /* Appearance: color schemes or a selected read-only BMP from Wallpapers. */
 static unsigned palette_index,wallpaper_index,wallpaper_scroll;
 static int mode; /* 0 = gradient, 1 = wallpaper */
+static unsigned desktop_icons_enabled=1u;
 static const char *status="SELECT A COLOR OR IMAGE";
 static int wallpaper_at(unsigned ordinal,char path[96]){
     unsigned count=0;
@@ -25,6 +27,10 @@ static const char *leaf(const char *path){
     return r;
 }
 static void load(void){
+    app_file_request_t desk={0};
+    oxp_copy(desk.path,"home/desktop.cfg",sizeof desk.path);
+    if(oxp_file(APP_FS_READ,&desk)==0 && desk.size==1u && desk.data[0]<=1u)
+        desktop_icons_enabled=desk.data[0];
     app_file_request_t r={0};oxp_copy(r.path,"home/appearance.cfg",sizeof r.path);
     if(!oxp_file(APP_FS_READ,&r)&&r.size==1&&oxp_theme_valid(r.data[0]))palette_index=r.data[0];
     r=(app_file_request_t){0};oxp_copy(r.path,"home/wallpaper.cfg",sizeof r.path);
@@ -44,7 +50,8 @@ static void save(void){
         app_file_request_t old={0};oxp_copy(old.path,"home/wallpaper.cfg",sizeof old.path);
         (void)oxp_file(APP_FS_DELETE,&old);
     }
-    status="SELECTION SAVED IN RAM";
+    status=(oxp_storage_status()&OXP_STORAGE_PRESENT)?
+        "SAVED - DISK CHECKPOINT PENDING":"SELECTION SAVED IN RAM";
 }
 static int apply(void){
     int64_t h=oxp_connect();if(h<=0){status="WINDOW SERVICE OFFLINE";return 0;}
@@ -69,6 +76,31 @@ static void choose_wallpaper(unsigned n){
     char path[96];if(!wallpaper_at(n,path)){status="NO SUCH WALLPAPER";return;}
     mode=1;wallpaper_index=n;if(apply())save();
 }
+static void toggle_desktop_icons(void){
+    unsigned requested=desktop_icons_enabled?0u:1u;
+    int64_t h=oxp_connect();
+    if(h<=0){status="WINDOW SERVICE OFFLINE";return;}
+    wm_packet_t msg={.magic=WM_MAGIC,.version=WM_VERSION,
+                     .operation=WM_DESKTOP,.x=requested},reply={0};
+    int64_t sent=oxp_send((uint64_t)h,&msg,sizeof msg);
+    int64_t count=sent==(int64_t)sizeof msg?
+        oxp_recv((uint64_t)h,&reply,sizeof reply):-1;
+    if(count==-11 && oxp_ipc_wait((uint64_t)h,50)>=0)
+        count=oxp_recv((uint64_t)h,&reply,sizeof reply);
+    (void)oxp_close((uint64_t)h);
+    if(count!=(int64_t)sizeof reply || reply.magic!=WM_MAGIC ||
+       reply.operation!=(WM_DESKTOP|WM_REPLY_FLAG) || reply.status!=WM_OK){
+        status="DESKTOP UPDATE FAILED";return;
+    }
+    desktop_icons_enabled=requested;
+    app_file_request_t save={0};
+    oxp_copy(save.path,"home/desktop.cfg",sizeof save.path);
+    save.size=1u;save.data[0]=(uint8_t)requested;
+    if(oxp_file(APP_FS_WRITE,&save)==0){
+        status=(oxp_storage_status()&OXP_STORAGE_PRESENT)?
+            "ICONS SAVED - DISK SYNC PENDING":"ICONS SAVED IN RAM";
+    }else status="ICONS APPLIED - SETTINGS NOT SAVED";
+}
 static unsigned theme_step(void){return (oxp_canvas_width()-28u)/3u;}
 static unsigned theme_bar_width(void){return theme_step()>4u?theme_step()-4u:1u;}
 static unsigned shown_wallpapers(void){
@@ -77,19 +109,28 @@ static unsigned shown_wallpapers(void){
 static void render(void){
     unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
     unsigned list_top=78u,rows=shown_wallpapers();
-    oxp_draw_cmd_t cmds[]={{OXP_DRAW_CLEAR,0,0,0,0,0xf0f5fd},
-        {OXP_DRAW_FILL,8,26,w-16,42,0xddebf9},
+    oxp_draw_cmd_t cmds[]={{OXP_DRAW_CLEAR,0,0,0,0,oxp_theme_panel(palette_index)},
+        {OXP_DRAW_FILL,8,26,w-16,42,oxp_theme_toolbar(palette_index)},
         {OXP_DRAW_FILL,8,list_top,w-16,h>list_top+13u?h-list_top-13u:1u,0xffffff}};
-    oxp_draw(cmds,3);oxp_label(12,10,"DISPLAY PROPERTIES",1,0x234b7d);
-    oxp_label(13,29,"COLOR SCHEME",1,0x184f87);
+    oxp_draw(cmds,3);
+    oxp_ui_toolbar((oxp_ui_rect){0,0,w,24});
+    oxp_ui_text((oxp_ui_rect){12u,0u,w>135u?w-135u:1u,24u},"Display Properties",10u,oxp_ui_ink(),0);
+    oxp_ui_button((oxp_ui_rect){w-112u,3u,108u,18u},
+                  desktop_icons_enabled?"ICONS: SHOW":"ICONS: HIDE",OXP_UI_NORMAL,0);
+    oxp_ui_panel((oxp_ui_rect){8,26,w-16,42});
+    oxp_ui_text((oxp_ui_rect){13u,26u,w-26u,16u},"Appearance theme",29u,oxp_ui_ink(),0);
     unsigned step=theme_step();
     for(unsigned i=0;i<OXP_THEME_COUNT;++i){
         unsigned x=14u+i*step;
-        oxp_fill(x,43,theme_bar_width(),18,oxp_theme_wallpaper(i));
+        oxp_ui_tab((oxp_ui_rect){x,41,theme_bar_width(),22},"",!mode&&palette_index==i);
+        oxp_fill(x+3u,45u,theme_bar_width()>6u?theme_bar_width()-6u:1u,13u,oxp_theme_wallpaper(i));
         if(!mode&&palette_index==i)oxp_label(x+theme_bar_width()-10u,46,"*",1,0xffffff);
+        /* Named themes; swatch fills and bitmap controls all change together. */
+        oxp_label(x+3u,55u,i==0u?"BLUE":i==1u?"OLIVE":"NIGHT",1u,0xffffff);
     }
-    oxp_label(13,69,"BACKGROUND",1,0x234b7d);
-    oxp_label(w-57u,69,"< >",1,0x234b7d);
+    oxp_ui_text((oxp_ui_rect){13u,66u,w-70u,16u},"Background",69u,oxp_ui_ink(),0);
+    oxp_ui_button((oxp_ui_rect){w-62u,66u,25u,14u},"<",OXP_UI_NORMAL,0);
+    oxp_ui_button((oxp_ui_rect){w-36u,66u,25u,14u},">",OXP_UI_NORMAL,0);
     for(unsigned i=0;i<rows;++i){
         char path[96];if(!wallpaper_at(wallpaper_scroll+i,path))break;
         unsigned y=82u+i*17u;
@@ -98,19 +139,24 @@ static void render(void){
         oxp_fill(16,y+5u,13,7,0x60a86b);
         oxp_label(38,y+4u,leaf(path),1,0x24517c);
     }
-    if(h>32u){oxp_label(12,h-12u,status,1,0x385d83);
-        oxp_label(w-55u,h-12u,"S SAVE",1,0x385d83);}
+    if(h>32u){oxp_label(12,h-12u,status,1,oxp_theme_ink(palette_index));
+        oxp_ui_button((oxp_ui_rect){w-67u,h-21u,61u,19u},"SAVE",OXP_UI_PRIMARY,0);}
 }
 void oxp_main(void){
     if(oxp_open("Display Properties"))oxp_exit(1);
+    oxp_ui_atlas_init_widgets();
     load();
     for(;;){
-        render();uint32_t e=oxp_wait(0);if(e==OXP_CLOSE||e==27)break;
+        render();uint32_t e=oxp_ui_wait_theme();if(e==OXP_CLOSE||e==27)break;
         if(e==OXP_SAVE||e=='s'||e=='S'){save();continue;}
         if(e==OXP_LEFT){if(wallpaper_scroll>=4)wallpaper_scroll-=4;continue;}
         if(e==OXP_RIGHT){char test[96];if(wallpaper_at(wallpaper_scroll+4,test))wallpaper_scroll+=4;continue;}
         if(e>='1'&&e<='3'){choose_theme(e-'1');continue;}
+        if(e=='i'||e=='I'){toggle_desktop_icons();continue;}
         if(e&OXP_CLICK){
+            if(oxp_hit(e,oxp_canvas_width()-112u,3u,108u,18u)){
+                toggle_desktop_icons();continue;
+            }
             for(unsigned i=0;i<3;++i)if(oxp_hit(e,14+i*theme_step(),43,theme_bar_width(),18)){
                 choose_theme(i);break;
             }
@@ -119,7 +165,7 @@ void oxp_main(void){
             for(unsigned i=0;i<shown_wallpapers();++i)if(oxp_hit(e,10,82+i*17,oxp_canvas_width()-20u,16)){
                 choose_wallpaper(wallpaper_scroll+i);break;
             }
-            if(oxp_hit(e,oxp_canvas_width()-60u,oxp_canvas_height()-16u,60,16))save();
+            if(oxp_hit(e,oxp_canvas_width()-67u,oxp_canvas_height()-21u,61,19))save();
         }
     }
     oxp_exit(0);

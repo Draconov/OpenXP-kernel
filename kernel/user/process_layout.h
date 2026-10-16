@@ -2,7 +2,7 @@
 #define OPENXP_USER_PROCESS_LAYOUT_H
 
 /* Each Ring 3 process owns a private 4 MiB virtual address range. Native ELF
- * images begin at offset 0x100000 and windowd requires a 512 KiB RW segment.
+ * images begin at offset 0x100000 and windowd reserves up to a 2 MiB RW segment for larger native surfaces.
  * Keep the guarded user stack near the end of the range: placing it just
  * above the native code (the former 0x110000 position) overlaps windowd's
  * data pages and prevents that service from launching. */

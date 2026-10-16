@@ -1,6 +1,7 @@
 #ifndef OPENXP_USER_SYSCALL_H
 #define OPENXP_USER_SYSCALL_H
 #include <stdint.h>
+#include <stdbool.h>
 #include "arch/x86_64/interrupts.h"
 #define OPENXP_SYS_VERSION 0u
 #define OPENXP_SYS_PUTC    1u
@@ -36,6 +37,22 @@
 #define OPENXP_SYS_NATIVE_INFO 31u
 #define OPENXP_SYS_NATIVE_ROW 32u
 #define OPENXP_SYS_GUI_CANVAS_SIZE 33u
+#define OPENXP_SYS_GUI_BITMAP 34u
+#define OPENXP_SYS_GUI_POINTER 35u /* opt in per owning native window */
+#define OPENXP_SYS_CLIPBOARD_SET 36u
+#define OPENXP_SYS_CLIPBOARD_GET 37u
+#define OPENXP_SYS_APP_LAUNCH_ARG 38u
+#define OPENXP_SYS_APP_GET_ARG 39u
+#define OPENXP_SYS_STORAGE 40u
+/* Storage status flags: only an explicitly formatted IDE disk enables writes. */
+#define OPENXP_STORAGE_PRESENT 1u
+#define OPENXP_STORAGE_DIRTY 2u
+#define OPENXP_STORAGE_QUEUED 4u
+#define OPENXP_STORAGE_ERROR 8u
+/* Boot controller fulfills user requests outside syscall context. */
+bool user_storage_flush_pending(void);
+void user_storage_mark_committed(uint64_t revision);
+void user_storage_mark_error(void);
 #define OPENXP_EAGAIN 11
 #define OPENXP_EPIPE 32
 #define OPENXP_ENOSPC 28

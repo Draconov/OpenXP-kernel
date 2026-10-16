@@ -4,12 +4,14 @@
 #ifndef OPENXP_PERSIST_HOST_TEST
 #include "arch/x86_64/irq_state.h"
 #endif
-#define MAGIC_DISK "OXPDISK1"
+#define MAGIC_DISK_V1 "OXPDISK1"
+#define MAGIC_DISK_V2 "OXPDISK2"
 #define MAGIC_SNAP "OXPSNAP1"
 #define CAP ((PERSIST_SLOT_SECTORS-1u)*PERSIST_BLOCK_BYTES)
 static persist_io_t io;
 static bool mounted;
 static unsigned slot_now;
+static uint32_t slot_sectors;
 static uint64_t generation;
 static uint8_t payload[CAP];
 static uint32_t rd32(const uint8_t *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);}
@@ -23,12 +25,13 @@ static uint32_t crc(const uint8_t *p,uint32_t n){
         result=(result>>1)^(0xedb88320u&(0u-(result&1u)));}
     return ~result;
 }
-static uint32_t base(unsigned slot){return slot ? PERSIST_SLOT_B:PERSIST_SLOT_A;}
+static uint32_t base(unsigned slot){return PERSIST_SLOT_A+(slot?slot_sectors:0u);}
+static uint32_t slot_capacity(void){return (slot_sectors-1u)*PERSIST_BLOCK_BYTES;}
 static bool read_slot(unsigned slot,uint64_t *gen,uint32_t *len){
     uint8_t hdr[512];
     if(!io.read(io.ctx,base(slot),hdr)||!match8(hdr,MAGIC_SNAP))return false;
     uint32_t size=rd32(hdr+16);
-    if(!size||size>CAP)return false;
+    if(!size||size>slot_capacity())return false;
     for(uint32_t i=0;i<(size+511)/512;++i)
         if(!io.read(io.ctx,base(slot)+1+i,payload+i*512))return false;
     if(crc(payload,size)!=rd32(hdr+20))return false;
@@ -78,13 +81,18 @@ static bool parse(uint32_t length,bool apply){
     return pos==length;
 }
 bool persist_mount(const persist_io_t *backend){
-    mounted=false;generation=0;slot_now=0;
+    mounted=false;generation=0;slot_now=0;slot_sectors=0;
     if(!backend||!backend->read||!backend->write)return false;
     uint8_t header[512];
-    if(!backend->read(backend->ctx,0,header)||!match8(header,MAGIC_DISK)||rd32(header+8)!=1u)
-        return false;
+    if(!backend->read(backend->ctx,0,header))return false;
+    if(match8(header,MAGIC_DISK_V1) && rd32(header+8)==1u)
+        slot_sectors=PERSIST_LEGACY_SLOT_SECTORS;
+    else if(match8(header,MAGIC_DISK_V2) && rd32(header+8)==2u)
+        slot_sectors=PERSIST_SLOT_SECTORS;
+    else return false;
     io=*backend;mounted=true;return true;
 }
+bool persist_is_mounted(void){return mounted;}
 uint64_t persist_generation(void){return mounted?generation:0;}
 bool persist_restore(void){
     if(!mounted)return false;
@@ -110,17 +118,17 @@ static bool snapshot_ramfs(size_t *out_len){
         char name[RAMFS_NAME_CAPACITY];
         if(!ramfs_name_at(i,name,sizeof(name)))return false;
         size_t n=0;while(name[n])++n;
-        if(n<1||n>=RAMFS_NAME_CAPACITY||pos+n+3>CAP)return false;
+        if(n<1||n>=RAMFS_NAME_CAPACITY||pos+n+3>slot_capacity())return false;
         size_t bytes=0;
         payload[pos++]=(uint8_t)n;
         for(size_t j=0;j<n;++j)payload[pos++]=(uint8_t)name[j];
         /* Reserve size prefix, read directly from RAMFS to the snapshot. */
         size_t prefix=pos;pos+=2;
-        if(!ramfs_read(name,payload+pos,CAP-pos,&bytes)||bytes>RAMFS_FILE_CAPACITY)return false;
+        if(!ramfs_read(name,payload+pos,slot_capacity()-pos,&bytes)||bytes>RAMFS_FILE_CAPACITY)return false;
         payload[prefix]=(uint8_t)bytes;payload[prefix+1]=(uint8_t)(bytes>>8);
         pos+=bytes;
     }
-    if(pos>CAP)return false;
+    if(pos>slot_capacity())return false;
     *out_len=pos;return true;
 }
 bool persist_commit(void){

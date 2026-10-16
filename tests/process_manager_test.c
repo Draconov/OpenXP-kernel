@@ -22,6 +22,7 @@ static uint64_t gdt_top = 0xffff8000000f0000ULL;
 static unsigned restore_calls, stack_changes;
 static struct { uint64_t cr3; unsigned owned_frames; } roots[64];
 static int demo_mode;
+static int expect_document_arg;
 static bool irq_enabled;
 static uint64_t mock_ticks;
 static unsigned sleep_calls;
@@ -149,6 +150,10 @@ void arch_user_enter(uint64_t ip, uint64_t sp, uint64_t *continuation, unsigned 
     assert(ip == MOCK_USER+0x100000);
     assert(sp > MOCK_USER && !(sp & 15));
     assert(process_current_pid() != 0);
+    char arg[PROCESS_LAUNCH_ARG_MAX]={0};
+    size_t arg_size=process_current_launch_arg(arg,sizeof arg);
+    if(expect_document_arg)assert(arg_size==14u && !strcmp(arg,"home/hello.txt"));
+    else assert(arg_size==0);
     assert(process_current_space() && process_current_space()->cr3 == active_root);
     assert(gdt_top != 0xffff8000000f0000ULL);
     if (demo_mode) process_record_fault(14, 0xf00d);
@@ -168,6 +173,9 @@ int main(void) {
         assert(info.completion_sequence == 0);
         assert(!process_state_terminal(info.state));
     }
+    assert(process_set_launch_arg(pids[0],"home/hello.txt"));
+    assert(!process_set_launch_arg(pids[0],NULL));
+    assert(!process_set_launch_arg(999,"home/hello.txt"));
     assert(!process_create_elf("full", 4));
     assert(frames == PROCESS_MAX_SLOTS * (4 + 1 + 1 + 4));
     assert(!process_reap(pids[0]));
@@ -186,7 +194,9 @@ int main(void) {
     process_info_t result;
     for (unsigned i = 0; i < PROCESS_MAX_SLOTS; ++i) {
         demo_mode = (i & 1);
+        expect_document_arg=(i==0);
         assert(process_run(pids[i], &result));
+        assert(!process_set_launch_arg(pids[i],"home/changed.txt"));
         assert(result.pid == pids[i] && result.status == (demo_mode ? 142 : 7));
         assert(result.state == (demo_mode ? PROCESS_FAULTED : PROCESS_EXITED));
         assert(process_state_terminal(result.state) && result.completion_sequence == i + 1);
@@ -215,6 +225,7 @@ int main(void) {
     assert(!process_cancel_ready(cancelled));
     uint64_t new_pid = process_create_elf("ok", 2);
     assert(new_pid > pids[PROCESS_MAX_SLOTS-1]);
+    expect_document_arg=0;
     assert(process_run(new_pid, NULL) && process_reap(new_pid) && frames == 0);
     puts("PASS: process table, unique PIDs, guarded stacks, CR3, exit/fault and full reclamation");
     return 0;

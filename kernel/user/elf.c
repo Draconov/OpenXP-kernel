@@ -24,8 +24,8 @@ _Static_assert(sizeof(struct elf64_program) == 56, "ELF64 program header size");
 #define ELF_PF_W 2u
 #define ELF_PF_R 4u
 #define MAX_PROGRAM_HEADERS 16u
-#define MAX_SEGMENT_BYTES (1024u * 1024u)
-#define MAX_LOADED_PAGES 256u
+#define MAX_SEGMENT_BYTES (2u * 1024u * 1024u)
+#define MAX_LOADED_PAGES 768u
 
 static bool within(size_t total, uint64_t offset, uint64_t size) {
     return offset <= total && size <= (uint64_t)total - offset;

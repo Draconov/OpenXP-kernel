@@ -69,6 +69,11 @@ bool ramfs_write(const char *name,const void *data,size_t size){
     f->size=size;f->used=true;
     ++revision;return true;
 }
+bool ramfs_size(const char *name,size_t *size){
+    int slot=name?find(name):-1;
+    if(slot<0 || !size)return false;
+    *size=files[slot].size;return true;
+}
 bool ramfs_read(const char *name,void *data,size_t capacity,size_t *size){
     if(!name || !size)return false;
     int slot=find(name);
@@ -104,6 +109,51 @@ bool ramfs_copy(const char *from,const char *to){
     for(size_t i=0;i<files[src].size;++i)target->data[i]=files[src].data[i];
     size_t n=0;while(to[n]){target->name[n]=to[n];++n;}target->name[n]=0;
     target->size=files[src].size;target->used=true;
+    ++revision;return true;
+}
+/* Rename a directory plus every child with a single metadata transaction.
+ * Preflight the entire rename before touching even one entry. */
+bool ramfs_rename_tree(const char *from,const char *to){
+    if(!valid_name(from)||!valid_name(to))return false;
+    size_t a=0,b=0;
+    while(from[a])++a;
+    while(to[b])++b;
+    if(b>=a && !equal(from,to)){
+        bool nested=true;
+        for(size_t j=0;j<a;++j)if(from[j]!=to[j]){nested=false;break;}
+        if(nested && to[a]=='/')return false;
+    }
+    if(equal(from,to))return false;
+    char next[RAMFS_MAX_FILES][RAMFS_NAME_CAPACITY];
+    bool affected[RAMFS_MAX_FILES]={0};
+    unsigned moved=0;
+    for(unsigned i=0;i<RAMFS_MAX_FILES;++i){
+        if(!files[i].used)continue;
+        const char *name=files[i].name;
+        size_t k=0;while(k<a && name[k] && name[k]==from[k])++k;
+        if(k!=a || (name[k]!='/' && name[k]!=0))continue;
+        size_t tail=0;while(name[k+tail])++tail;
+        if(b+tail>=RAMFS_NAME_CAPACITY)return false;
+        for(size_t j=0;j<b;++j)next[i][j]=to[j];
+        for(size_t j=0;j<=tail;++j)next[i][b+j]=name[k+j];
+        if(!valid_name(next[i]))return false;
+        affected[i]=true;++moved;
+    }
+    if(!moved)return false;
+    for(unsigned i=0;i<RAMFS_MAX_FILES;++i){
+        if(!affected[i])continue;
+        for(unsigned j=0;j<RAMFS_MAX_FILES;++j){
+            if(!files[j].used || i==j)continue;
+            if(affected[j]){
+                if(equal(next[i],next[j]))return false;
+            }else if(equal(next[i],files[j].name))return false;
+        }
+    }
+    for(unsigned i=0;i<RAMFS_MAX_FILES;++i){
+        if(!affected[i])continue;
+        size_t j=0;while(next[i][j]){files[i].name[j]=next[i][j];++j;}
+        files[i].name[j]=0;
+    }
     ++revision;return true;
 }
 size_t ramfs_count(void){

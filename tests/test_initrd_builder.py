@@ -26,11 +26,11 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(len(image),176+6500)
 
     def test_large_window_service_data_segment(self):
-        image = elf_from_native_flat(bytes(5000), 512 * 1024)
-        self.assertEqual(int.from_bytes(image[160:168], "little"), 512 * 1024)
+        image = elf_from_native_flat(bytes(5000), 2 * 1024 * 1024)
+        self.assertEqual(int.from_bytes(image[160:168], "little"), 2 * 1024 * 1024)
         self.assertEqual(check_map("104000 104000 59270 16 .bss\n"), 0x59270)
         with self.assertRaises(ValueError):
-            check_map("104000 104000 80001 16 .bss\n")
+            check_map("104000 104000 200001 16 .bss\n")
         with self.assertRaises(ValueError):
             check_map("104000 104000 10 16 .data\n104000 104000 59270 16 .bss\n")
 

@@ -24,6 +24,10 @@ typedef struct {
     bool saved_minimized[DESKTOP_WINDOWS];
     unsigned menu_selection;
     int drag_window,resize_window,last_x,last_y,mouse_x,mouse_y;
+    /* Captured native-app gestures and last hover target, separate from
+     * caption/titlebar capture by the privileged shell service. */
+    int native_pointer_capture,native_pointer_hover;
+    uint64_t native_capture_owner,native_hover_owner;
     int selected_file;
     char file_folder[48];
     char file_preview[512];

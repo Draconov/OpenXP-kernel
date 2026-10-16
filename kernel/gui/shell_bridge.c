@@ -23,7 +23,7 @@ static uint32_t qhead,qtail;
 static bool running,dirty,menu_is_open;
 static uint64_t service_pid, last_frame_tick;
 static uint64_t scene_version;
-static bool pointer_captured;
+static bool pointer_captured, shell_press_captured;
 static desktop_t *desktop;
 static uint64_t lock_state(void){
 #ifndef OPENXP_SHELL_HOST_TEST
@@ -41,7 +41,7 @@ static void unlock_state(uint64_t flags){
 }
 void shell_bridge_reset(void){
     uint64_t flags=lock_state();
-    ++scene_version;running=false;menu_is_open=false;dirty=true;frame_count=0;window_count=0;has_window_plan=false;qhead=qtail=0;service_pid=0;last_frame_tick=0;pointer_captured=false;
+    ++scene_version;running=false;menu_is_open=false;dirty=true;frame_count=0;window_count=0;has_window_plan=false;qhead=qtail=0;service_pid=0;last_frame_tick=0;pointer_captured=false;shell_press_captured=false;
     raster_pid=0;
     for(unsigned l=0;l<OXP_SHELL_LAYERS;++l){
         published[l]=false;active_bank[l]=0;rows_total[l]=0;
@@ -249,6 +249,19 @@ void shell_bridge_compose_background(fb_surface_t *target){
 }
 static void push(const oxp_shell_event_t *event){
     uint64_t flags=lock_state();
+    /* Continuous PS/2 motion must not evict a pending key, press or release.
+     * Keep the newest coordinate when the queue's tail event is also motion.
+     * Never coalesce across a button transition or reorder clicks. */
+    if(event->type==OXP_SHELL_EVENT_POINTER &&
+       event->flags==OXP_SHELL_POINTER_MOVE && qhead!=qtail){
+        uint32_t last=(qhead+SHELL_INPUT_CAP-1u)%SHELL_INPUT_CAP;
+        if(queue[last].type==OXP_SHELL_EVENT_POINTER &&
+           queue[last].flags==OXP_SHELL_POINTER_MOVE){
+            queue[last]=*event;
+            unlock_state(flags);
+            return;
+        }
+    }
     uint32_t next=(qhead+1u)%SHELL_INPUT_CAP;
     if(next==qtail)qtail=(qtail+1u)%SHELL_INPUT_CAP;
     queue[qhead]=*event;qhead=next;
@@ -267,25 +280,54 @@ bool shell_bridge_route(const input_event_t *e,bool menu_visible,int height){
         if(!global && !menu_visible)return false;
         m.type=OXP_SHELL_EVENT_KEY;m.code=(uint32_t)e->code;
         m.modifiers=e->modifiers;m.character=(unsigned char)e->key;
-    }else if(pointer_captured && (e->kind==INPUT_MOVE || e->kind==INPUT_BUTTON)){
-        /* The service owns window dragging. A release is delivered even if
-           the mouse leaves the title bar or screen edge. */
+    }else if((pointer_captured || shell_press_captured) &&
+             (e->kind==INPUT_MOVE || e->kind==INPUT_BUTTON)){
+        /* A captured gesture is completed in Ring 3 even when the pointer
+         * moves off-screen or over a different process. */
         m.type=OXP_SHELL_EVENT_POINTER;
         m.flags=e->left?OXP_SHELL_POINTER_MOVE:OXP_SHELL_POINTER_UP;
         m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
-        if(!e->left)pointer_captured=false;
+        if(!e->left){pointer_captured=false;shell_press_captured=false;}
+    }else if(e->kind==INPUT_MOVE){
+        /* Forward motion without consuming it: clients still receive their
+         * regular mouse input, while windowd can update hover artwork.
+         * Successive motion events coalesce in push(). */
+        m.type=OXP_SHELL_EVENT_POINTER;m.flags=OXP_SHELL_POINTER_MOVE;
+        m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
+        push(&m);return false;
+    }else if(e->kind==INPUT_BUTTON && !e->left){
+        /* Also observe ordinary client releases without consuming them.
+         * Cross-window file drops need a global UP event, while the source
+         * client must retain its own release for text/file gestures. */
+        m.type=OXP_SHELL_EVENT_POINTER;m.flags=OXP_SHELL_POINTER_UP;
+        m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
+        push(&m);return false;
     }else if(e->kind==INPUT_BUTTON && e->left){
-        /* Icon activation belongs to the userspace desktop. */
-        if(!menu_visible && e->x>=14 && e->x<108 && e->y>=25 && e->y<272){
-            m.type=OXP_SHELL_EVENT_CLICK;m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
+        /* Shell controls use press/release rather than launching on mouse
+         * down. A press on an obscured desktop icon belongs to the window. */
+        bool icon=!menu_visible && e->x>=14 && e->x<115 &&
+                  e->y>=23 && e->y<23+5*109 &&
+                  (e->y-23)%109<92;
+        if(icon && desktop){
+            for(int z=DESKTOP_WINDOWS-1;z>=0;--z){
+                unsigned i=has_window_plan && (uint32_t)z<window_count?
+                    window_order[z]:(unsigned)desktop->order[z];
+                if(has_window_plan && (uint32_t)z>=window_count)continue;
+                desktop_window_t *w=&desktop->windows[i];
+                if(w->open && !w->minimized && e->x>=w->x && e->x<w->x+w->w &&
+                   e->y>=w->y && e->y<w->y+w->h){icon=false;break;}
+            }
+        }
+        if(menu_visible || e->y>=height-42 || icon){
+            shell_press_captured=true;
+            m.type=OXP_SHELL_EVENT_POINTER;m.flags=OXP_SHELL_POINTER_DOWN;
+            m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
             push(&m);return true;
         }
         /* Capture titlebar drags and bottom-right resize grips, never the
            application viewport itself or trusted caption buttons. */
         if(desktop){
             for(int z=DESKTOP_WINDOWS-1;z>=0;--z){
-                /* Use the service's current composition order for hit testing;
-                 * the kernel only filters unsafe client/title-bar clicks. */
                 if(has_window_plan && (uint32_t)z>=window_count)continue;
                 unsigned i=has_window_plan?window_order[z]:(unsigned)desktop->order[z];
                 desktop_window_t *w=&desktop->windows[i];
@@ -304,8 +346,7 @@ bool shell_bridge_route(const input_event_t *e,bool menu_visible,int height){
             }
         }
         if(m.type==OXP_SHELL_EVENT_POINTER){push(&m);return true;}
-        if(e->y<height-42 && !(menu_visible && e->x<510 && e->y>=height-412))return false;
-        m.type=OXP_SHELL_EVENT_CLICK;m.x=(uint32_t)e->x;m.y=(uint32_t)e->y;
+        return false;
     }else return false;
     push(&m);return true;
 }

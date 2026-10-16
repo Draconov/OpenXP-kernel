@@ -77,6 +77,25 @@ static const uint8_t *glyph(char c) {
     }
 }
 
+static const oxp_font_t *aurora_font;
+void oxp_raster_set_font(const oxp_font_t *font){
+    aurora_font=(font && font->alpha)?font:0;
+}
+unsigned oxp_raster_text_width(const char *text,unsigned scale){
+    if(!scale || scale>2u)return 0;
+    if(aurora_font)return oxp_font_width(aurora_font,text,0)*scale;
+    unsigned i=0;if(text)while(i<256u&&text[i])++i;
+    return i*6u*scale;
+}
+static uint16_t oxp_raster_mix(uint16_t bg,uint16_t fg,unsigned a){
+    if(a>=255u)return fg;
+    if(!a)return bg;
+    if(bg==OXP_SHELL_TRANSPARENT)bg=0u;
+    unsigned r=(((bg>>11)&31u)*(255u-a)+((fg>>11)&31u)*a)/255u;
+    unsigned g=(((bg>>5)&63u)*(255u-a)+((fg>>5)&63u)*a)/255u;
+    unsigned b=((bg&31u)*(255u-a)+(fg&31u)*a)/255u;
+    return (uint16_t)((r<<11)|(g<<5)|b);
+}
 static uint16_t pack565(uint32_t c){
     return (uint16_t)((((c>>19)&31u)<<11)|(((c>>10)&63u)<<5)|((c>>3)&31u));
 }
@@ -105,6 +124,23 @@ static void oxp_raster_core(const oxp_shell_draw_t *commands,size_t n,unsigned l
             unsigned scale=c->w;
             if(!scale || scale>2 || y<c->y)continue;
             unsigned row=(y-c->y)/scale;
+            if(aurora_font){
+                if(row>=OXP_FONT_CH)continue;
+                unsigned pen=c->x;
+                for(unsigned letter=0;letter<OXP_SHELL_TEXT_MAX && c->text[letter];++letter){
+                    unsigned adv=oxp_font_advance(aurora_font,(unsigned char)c->text[letter],scale==2u);
+                    if(pen>=OXP_SHELL_RASTER_W)break;
+                    for(unsigned dx=0;dx<OXP_FONT_CW*scale;++dx){
+                        unsigned xx=pen+dx;
+                        if(xx>=OXP_SHELL_RASTER_W)break;
+                        unsigned alpha=oxp_font_alpha(aurora_font,(unsigned char)c->text[letter],scale==2u,
+                                                     dx/scale,row);
+                        if(alpha)pixels[xx]=oxp_raster_mix(pixels[xx],col,alpha);
+                    }
+                    pen+=adv*scale;
+                }
+                continue;
+            }
             if(row>=7u)continue;
             for(unsigned letter=0;letter<OXP_SHELL_TEXT_MAX && c->text[letter];++letter){
                 uint32_t pos=c->x+letter*6u*scale;
@@ -122,6 +158,15 @@ static void oxp_raster_core(const oxp_shell_draw_t *commands,size_t n,unsigned l
     }
 }
 
+void oxp_raster_background_text_row(const oxp_shell_draw_t *commands,size_t n,
+                                     unsigned y,uint16_t *pixels){
+    if(!commands || !pixels || y>=OXP_SHELL_RASTER_H)return;
+    for(size_t i=0;i<n;++i){
+        if(commands[i].op==OXP_SHELL_BG_TEXT)
+            oxp_raster_core(commands+i,1,0,y,pixels,1);
+    }
+}
+
 void oxp_raster_row(const oxp_shell_draw_t *commands,size_t n,unsigned layer,
                     unsigned y,uint16_t *pixels){
     oxp_raster_core(commands,n,layer,y,pixels,0);
@@ -129,4 +174,9 @@ void oxp_raster_row(const oxp_shell_draw_t *commands,size_t n,unsigned layer,
 void oxp_raster_overlay_background(const oxp_shell_draw_t *commands,size_t n,
                                    unsigned y,uint16_t *pixels){
     oxp_raster_core(commands,n,0,y,pixels,1);
+}
+
+void oxp_raster_over_row(const oxp_shell_draw_t *commands,size_t n,
+                         unsigned layer,unsigned y,uint16_t *pixels){
+    oxp_raster_core(commands,n,layer,y,pixels,1);
 }

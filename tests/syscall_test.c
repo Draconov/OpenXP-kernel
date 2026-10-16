@@ -18,26 +18,32 @@ static char emitted;
 static address_space_t mock_space = { .cr3 = 4096 };
 static char output[128];
 static char mock_user_memory[64] = "Hello from user memory";
-static app_file_request_t mock_file;
+static union { app_file_request_t file; native_bitmap_req_t bitmap; unsigned char bytes[sizeof(native_bitmap_req_t)]; } mock_storage;
+#define mock_file mock_storage.file
 static size_t output_len;
 const address_space_t *userspace_current_space(void) { return active ? &mock_space : NULL; }
 bool aspace_range_valid(const address_space_t *s, uint64_t ptr, size_t len, bool writable) {
     if(s != &mock_space)return false;
-    if(ptr>=2000 && ptr-2000<=sizeof(mock_file))return len<=sizeof(mock_file)-(size_t)(ptr-2000);
+    if(ptr>=2000 && ptr-2000<=sizeof(mock_storage))return len<=sizeof(mock_storage)-(size_t)(ptr-2000);
     return !writable && ptr>=1000 && ptr-1000<=64 && len<=64-(size_t)(ptr-1000);
 }
 bool aspace_copy_from_user(const address_space_t *s, void *dst, uint64_t ptr, size_t len) {
     if (!aspace_range_valid(s,ptr,len,false)) return false;
-    if(ptr>=2000)memcpy(dst,(const char *)&mock_file+(ptr-2000),len);
+    if(ptr>=2000)memcpy(dst,mock_storage.bytes+(ptr-2000),len);
     else memcpy(dst,mock_user_memory+(ptr-1000),len);
     return true;
 }
 
 bool aspace_copy_to_user(address_space_t *s,uint64_t dst,const void *src,size_t len) {
     if(!aspace_range_valid(s,dst,len,true))return false;
-    memcpy((char *)&mock_file+(dst-2000),src,len);return true;
+    memcpy(mock_storage.bytes+(dst-2000),src,len);return true;
 }
 uint64_t process_current_pid(void) { return active ? 17 : 0; }
+size_t process_current_launch_arg(char *out,size_t cap){
+    const char *s="home/hello.txt";
+    if(!active || cap<15u)return 0;
+    memcpy(out,s,15u);return 14u;
+}
 bool userspace_active(void) { return active; }
 void userspace_finish(uint64_t status) { exit_status = status; active = false; }
 void serial_putc(char ch) { emitted = ch; if (output_len < sizeof(output)) output[output_len++] = ch; }
@@ -90,6 +96,49 @@ int main(void) {
     f.rax = OPENXP_SYS_TICKS;
     r = user_syscall_dispatch(&f);
     assert(!r.exit && r.result == 1234);
+    /* Aurora 13 clipboard syscalls validate both directions and never
+     * overwrite the stored selection on a rejected user pointer/length. */
+    f.rax=OPENXP_SYS_CLIPBOARD_SET;f.rdi=2000;f.rsi=5;
+    memcpy(mock_storage.bytes,"hello",5);
+    r=user_syscall_dispatch(&f);assert(r.result==5);
+    f.rdi=999;
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rdi=2000;f.rsi=961;
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    f.rax=OPENXP_SYS_CLIPBOARD_GET;f.rsi=4;
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_ENOSPC);
+    f.rsi=5;f.rdi=999;
+    r=user_syscall_dispatch(&f);assert(r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rdi=2000;memset(mock_storage.bytes,0,5);
+    r=user_syscall_dispatch(&f);
+    assert(r.result==5 && !memcmp(mock_storage.bytes,"hello",5));
+    f.rax=OPENXP_SYS_CLIPBOARD_SET;f.rsi=0;f.rdi=0;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rax=OPENXP_SYS_CLIPBOARD_GET;f.rdi=2000;f.rsi=0;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rax=OPENXP_SYS_APP_GET_ARG;f.rdi=2000;f.rsi=10;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_ENOSPC);
+    f.rsi=96;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==14 && !strcmp((char*)mock_storage.bytes,"home/hello.txt"));
+    f.rax=OPENXP_SYS_APP_LAUNCH_ARG;
+    app_launch_request_t *launch=(app_launch_request_t*)mock_storage.bytes;
+    memset(launch,0,sizeof *launch);
+    strcpy(launch->executable,"bin/notepad");
+    strcpy(launch->argument,"home/hello.txt");
+    f.rdi=2000;f.rsi=0;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    app_launch_request_t queued;
+    assert(app_launch_take_request(&queued));
+    assert(!strcmp(queued.executable,"bin/notepad"));
+    assert(!strcmp(queued.argument,"home/hello.txt"));
+    strcpy(launch->argument,"home/../oops");
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EAGAIN);
+    f.rax=OPENXP_SYS_STORAGE;f.rdi=0;
+    r=user_syscall_dispatch(&f);assert(r.result==0);
+    f.rdi=1;r=user_syscall_dispatch(&f);assert(r.result==0);
     native_reset();
     f.rax = OPENXP_SYS_GUI_OPEN;
     f.rdi = 999;f.rsi = 5;
@@ -103,7 +152,7 @@ int main(void) {
     assert(!r.exit && r.result==((uint64_t)320<<32|180u));
     native_set_window_size(0,1024u,726u);
     r=user_syscall_dispatch(&f);
-    assert(!r.exit && (unsigned)(r.result>>32)<320u && (unsigned)r.result==180u);
+    assert(!r.exit && (unsigned)(r.result>>32)>320u && (unsigned)r.result==360u);
     assert(native_next_event(17)==NATIVE_EVENT_RESIZE);
     f.rax = OPENXP_SYS_GUI_TEXT;
     f.rsi = 22;
@@ -250,9 +299,26 @@ int main(void) {
     r=user_syscall_dispatch(&f);
     assert(r.result==0);
     oxp_native_row_t row;
-    memcpy(&row,&mock_file,sizeof(row));
+    memcpy(&row,mock_storage.bytes,sizeof(row));
     assert(row.slot==0 && row.y==0 && row.pixels[0]==0x07e0u);
     f.rdx=OXP_NATIVE_H;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EINVAL);
+    /* System call 34 copies, validates and alpha-blends a caller-owned tile.
+     * A forged pointer is rejected before any app pixel is changed. */
+    f.rax=OPENXP_SYS_GUI_BITMAP;f.rdi=999;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==(uint64_t)-OPENXP_EFAULT);
+    f.rdi=2000;
+    mock_storage.bitmap=(native_bitmap_req_t){0};
+    mock_storage.bitmap.x=8;mock_storage.bitmap.y=8;
+    mock_storage.bitmap.w=1;mock_storage.bitmap.h=1;
+    mock_storage.bitmap.pixels[0]=0x1fu;
+    mock_storage.bitmap.pixels[1]=0x00u;
+    mock_storage.bitmap.pixels[2]=255u;
+    r=user_syscall_dispatch(&f);
+    assert(r.result==0 && native_test_pixel(0,8,8)==0x001fu);
+    mock_storage.bitmap.w=33;
     r=user_syscall_dispatch(&f);
     assert(r.result==(uint64_t)-OPENXP_EINVAL);
     f.rax=OPENXP_SYS_WM_DISPLAY;

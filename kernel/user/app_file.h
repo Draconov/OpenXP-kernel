@@ -13,6 +13,9 @@
 #define APP_FS_KIND 6u
 #define APP_FS_COPY 7u
 #define APP_FS_READ_SLICE 8u /* index=byte offset, size=requested bytes */
+#define APP_FS_MKDIR 9u      /* create empty writable HOME directory */
+#define APP_FS_RMDIR 10u     /* remove only an empty writable directory */
+#define APP_FS_STAT 11u      /* return req.index=kind, req.size=byte length */
 typedef struct {
     char path[APP_FILE_PATH];
     char dest[APP_FILE_PATH];

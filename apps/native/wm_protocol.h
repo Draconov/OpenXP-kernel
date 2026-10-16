@@ -14,7 +14,9 @@
 #define WM_DESKTOP_HEIGHT 728u
 
 enum wm_operation { WM_CREATE=1, WM_MOVE=2, WM_FOCUS=3, WM_QUERY=4,
-                    WM_CLOSE=5, WM_PING=6, WM_THEME=7, WM_WALLPAPER=8 };
+                    WM_CLOSE=5, WM_PING=6, WM_THEME=7, WM_WALLPAPER=8,
+                    WM_DESKTOP=9, /* x: 0=hide shortcuts, 1=show */
+                    WM_DRAG_BEGIN=10 };
 enum wm_result { WM_OK=0, WM_BAD_REQUEST=1, WM_UNAUTHORIZED=2,
                  WM_NOT_FOUND=3, WM_NO_SLOTS=4, WM_BAD_GEOMETRY=5 };
 typedef struct {
@@ -23,6 +25,13 @@ typedef struct {
     char title[WM_TITLE_SIZE];
 } wm_packet_t;
 _Static_assert(sizeof(wm_packet_t)==60, "IPC wire packet must fit 64 bytes");
+/* Separate 64-byte packet: a sanitized short VFS document path, never a
+ * pointer or an arbitrary executable. Standard WM packets stay ABI-stable. */
+typedef struct {
+    uint32_t magic,version,operation;
+    char path[52];
+} wm_drag_packet_t;
+_Static_assert(sizeof(wm_drag_packet_t)==64, "drop packet ABI");
 
 /* Service-side logical window policy. A restricted syscall bridges accepted
  * changes into the Ring 0 compositor without exposing kernel pointers. */

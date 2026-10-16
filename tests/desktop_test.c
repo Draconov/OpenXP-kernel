@@ -72,6 +72,22 @@ int main(void){
     native_reset();
     assert(native_open(800,"Large native",12));
     desktop_native_show(&d,0,true);
+    /* Aurora 13: global shortcuts stay in desktop policy, while edit
+     * commands go only to the currently focused native window. */
+    assert(desktop_shell_focus(&d,DESKTOP_NATIVE));
+    while(native_next_event(800)){}
+    input_event_t edit_key={.kind=INPUT_KEY,.code=KEY_CHARACTER,
+                           .key='C',.modifiers=KEYMOD_CTRL};
+    desktop_key_event(&d,&edit_key);
+    assert(native_next_event(800)==OXP_KEY_COPY);
+    edit_key.key='v';desktop_key_event(&d,&edit_key);
+    assert(native_next_event(800)==OXP_KEY_PASTE);
+    edit_key.code=KEY_RIGHT;edit_key.key=0;edit_key.modifiers=KEYMOD_SHIFT;
+    desktop_key_event(&d,&edit_key);
+    assert(native_next_event(800)==OXP_KEY_SELECT_RIGHT);
+    edit_key.code=KEY_DELETE;edit_key.modifiers=0;
+    desktop_key_event(&d,&edit_key);
+    assert(native_next_event(800)==OXP_KEY_DELETE);
     assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
     assert(d.windows[DESKTOP_NATIVE].w==640);
     assert(desktop_shell_maximize(&d,DESKTOP_NATIVE));
@@ -528,6 +544,35 @@ int main(void){
     assert(((right>>10)&1023u)==cx && (right&1023u)==cy);
     desktop_right_mouse(&fast,mx,my,false);
     assert(native_next_event(90)==0 && native_next_event(92)==0);
+    /* Aurora 11: an opted-in app gets a continuous pointer stream instead
+       of an immediate legacy CLICK. Capture survives a move off the client. */
+    assert(native_pointer_enable(91));
+    desktop_mouse(&fast,mx,my,false);
+    uint32_t motion=native_next_event(91);
+    assert((motion&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE);
+    desktop_mouse(&fast,mx,my,true);
+    uint32_t press=native_next_event(91);
+    assert((press&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_DOWN);
+    motion=native_next_event(91);
+    assert((motion&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE);
+    desktop_mouse(&fast,2,2,true);
+    assert(native_next_event(91)==NATIVE_EVENT_POINTER_LEAVE);
+    motion=native_next_event(91);
+    assert((motion&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE);
+    assert((motion&1023u)==1023u);
+    desktop_mouse(&fast,2,2,false);
+    uint32_t release=native_next_event(91);
+    assert((release&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_UP);
+    assert((release&1023u)==1023u);
+    assert(!native_next_event(91));
+    /* Keyboard focus traversal stays separate from native text input. */
+    assert(desktop_shell_focus(&fast,DESKTOP_NATIVE2));
+    ev=(input_event_t){.kind=INPUT_KEY,.code=KEY_TAB};
+    desktop_key_event(&fast,&ev);
+    assert(native_next_event(91)==9u);
+    ev.modifiers=KEYMOD_SHIFT;
+    desktop_key_event(&fast,&ev);
+    assert(native_next_event(91)==NATIVE_EVENT_SHIFT_TAB);
     native_owner_exit(91);desktop_native_show(&fast,1,false);
     assert(!fast.windows[DESKTOP_NATIVE2].open);
     assert(fast.windows[DESKTOP_NATIVE].open);

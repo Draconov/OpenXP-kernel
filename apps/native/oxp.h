@@ -3,9 +3,21 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "../../kernel/user/app_file.h"
+#include "../../kernel/user/app_launch.h"
+#define OXP_STORAGE_PRESENT 1u
+#define OXP_STORAGE_DIRTY 2u
+#define OXP_STORAGE_QUEUED 4u
+#define OXP_STORAGE_ERROR 8u
+#include "../../kernel/gui/editor_keycodes.h"
 #define OXP_DRAW_FILL 1u
 #define OXP_DRAW_CLEAR 2u
 #define OXP_DRAW_GLYPH 3u
+#define OXP_BITMAP_TILE 32u
+typedef struct {
+    uint32_t x,y,w,h;
+    uint8_t pixels[OXP_BITMAP_TILE*OXP_BITMAP_TILE*3u];
+} oxp_bitmap_req_t;
+_Static_assert(sizeof(oxp_bitmap_req_t)==3088u,"bitmap syscall ABI");
 #define OXP_CANVAS_W 320u
 #define OXP_CANVAS_H 180u
 typedef struct { uint32_t op,x,y,w,h,color; } oxp_draw_cmd_t;
@@ -19,6 +31,12 @@ typedef struct { uint32_t op,x,y,w,h,color; } oxp_draw_cmd_t;
 #define OXP_LEFT 0x10005u
 #define OXP_RIGHT 0x10006u
 #define OXP_RESIZE 0x10007u
+#define OXP_POINTER_LEAVE 0x10008u
+#define OXP_SHIFT_TAB 0x10009u
+#define OXP_POINTER_MOVE 0x20000000u
+#define OXP_POINTER_DOWN 0x10000000u
+#define OXP_POINTER_UP 0x08000000u
+#define OXP_POINTER_MASK 0x38000000u
 static inline unsigned oxp_click_x(uint32_t e){return (e >> 10) & 1023u;}
 static inline unsigned oxp_click_y(uint32_t e){return e & 1023u;}
 static inline uint64_t oxp_call(uint64_t id,uint64_t a,uint64_t b) {
@@ -56,12 +74,15 @@ static inline int oxp_text(const char *s){return (int)oxp_call(7,(uint64_t)s,oxp
 static inline int oxp_draw(const oxp_draw_cmd_t *commands,size_t count){
     return (int)oxp_call(11,(uint64_t)commands,count);
 }
+static inline int oxp_bitmap(const oxp_bitmap_req_t *tile){
+    return (int)oxp_call(34,(uint64_t)tile,0);
+}
 static inline int oxp_fill(unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
     oxp_draw_cmd_t cmd={OXP_DRAW_FILL,x,y,w,h,color};
     return oxp_draw(&cmd,1);
 }
 /* Snapshot the trusted compositor's logical client size. Unmanaged old
- * clients still receive the original 320x180 layout. */
+ * clients retain the original 320x180 default layout. */
 static inline uint64_t oxp_canvas_size(void){
     uint64_t packed=oxp_call(33,0,0);
     return packed?packed:((uint64_t)OXP_CANVAS_W<<32)|OXP_CANVAS_H;
@@ -82,20 +103,47 @@ static inline int oxp_label(unsigned x,unsigned y,const char *text,unsigned scal
     }
     return used?oxp_draw(cmd,used):0;
 }
+/* System-wide, ephemeral, bounded clipboard. Return copied byte count or
+ * negative errno. No arbitrary kernel pointers are ever shared. */
+#define OXP_CLIPBOARD_MAX 960u
+static inline int64_t oxp_clipboard_set(const void *p,size_t n){
+    return (int64_t)oxp_call(36,(uint64_t)p,n);
+}
+static inline int64_t oxp_clipboard_get(void *p,size_t cap){
+    return (int64_t)oxp_call(37,(uint64_t)p,cap);
+}
 static inline int64_t oxp_file(unsigned op,app_file_request_t *req){
     return (int64_t)oxp_call(27,op,(uint64_t)req);
 }
 static inline int64_t oxp_launch(const char *path){
     return (int64_t)oxp_call(28,(uint64_t)path,oxp_len(path));
 }
+static inline uint64_t oxp_storage_status(void){return oxp_call(40,0,0);}
+static inline uint64_t oxp_storage_flush(void){return oxp_call(40,1,0);}
+static inline int64_t oxp_launch_document(const char *program,const char *path){
+    app_launch_request_t req={0};
+    if(!program||!path)return -1;
+    size_t a=oxp_len(program),b=oxp_len(path);
+    if(!a||a>=sizeof req.executable||!b||b>=sizeof req.argument)return -1;
+    for(size_t i=0;i<=a;++i)req.executable[i]=program[i];
+    for(size_t i=0;i<=b;++i)req.argument[i]=path[i];
+    return (int64_t)oxp_call(38,(uint64_t)&req,0);
+}
+static inline int64_t oxp_launch_argument(char *path,size_t cap){
+    return (int64_t)oxp_call(39,(uint64_t)path,cap);
+}
 static inline void oxp_copy(char *dst,const char *src,size_t cap){
-    if(!cap)return;size_t i=0;while(i+1<cap && src[i]){dst[i]=src[i];++i;}dst[i]=0;
+    if(!cap)return;
+    size_t i=0;
+    while(i+1<cap && src[i]){dst[i]=src[i];++i;}
+    dst[i]=0;
 }
 static inline int oxp_hit(uint32_t e,unsigned x,unsigned y,unsigned w,unsigned h){
     if(!(e&(OXP_CLICK|OXP_RIGHT_CLICK)))return 0;
     unsigned ex=oxp_click_x(e),ey=oxp_click_y(e);
     return ex>=x+16 && ey>=y+43 && ex-x-16<w && ey-y-43<h;
 }
+static inline int oxp_pointer_enable(void){return (int)oxp_call(35,0,0);}
 static inline uint32_t oxp_event(void){return (uint32_t)oxp_call(8,0,0);}
 /* Zero waits for an event without a deadline. For periodic refresh pass a
  * bounded timeout in PIT ticks; a zero result means the timer expired. */
@@ -110,6 +158,7 @@ static inline void oxp_puts(char *dst,size_t *pos,size_t cap,const char *src){
 }
 static inline void oxp_u64(char *dst,size_t *pos,size_t cap,uint64_t n){
     char rev[24];size_t z=0;do{rev[z++]=(char)('0'+n%10);n/=10;}while(n&&z<24);
-    while(z&&*pos+1<cap)dst[(*pos)++]=rev[--z];dst[*pos]=0;
+    while(z&&*pos+1<cap)dst[(*pos)++]=rev[--z];
+    dst[*pos]=0;
 }
 #endif

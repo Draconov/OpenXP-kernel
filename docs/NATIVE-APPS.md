@@ -100,10 +100,10 @@ requires confirmation.**
 ## Security and compatibility boundaries
 
 - Up to **three** simultaneous PID-owned native windows, each with an
-  independent **320×180 RGB565** backing surface and/or text content.
-  The visible logical canvas is cropped in one dimension to match the client
-  aspect ratio (e.g. a tall window uses fewer logical columns), then nearest-
-  neighbour scaled to fill the client. The app queries its current canvas with
+  independent bounded **640×360 RGB565** backing allocation and/or text content.
+  The visible logical canvas grows with the window size, preserving the
+  client aspect ratio and nearest-neighbour scaling. Normal-size apps use
+  approximately 320×180; a maximized client can use more drawing pixels. The app queries its current canvas with
   `oxp_canvas_width()` / `oxp_canvas_height()`.
   The owner is checked for updates and event reads; exit/fault releases its
   window. The fourth concurrent `GUI_OPEN` fails cleanly.

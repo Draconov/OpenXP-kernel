@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     assert(vfs_name_at(0,name,sizeof(name)));
     size_t file_len=0;
     char docs[8192];
-    char native1[16384],native2[16384];size_t n1=0,n2=0;
+    char native1[32768],native2[32768];size_t n1=0,n2=0;
     assert(vfs_read("bin/notepad",native1,sizeof(native1),&n1));
     assert(vfs_read("system apps/notepad.exe",native2,sizeof(native2),&n2));
     assert(n1==n2 && !memcmp(native1,native2,n1));
@@ -102,6 +102,49 @@ int main(int argc, char **argv) {
     assert(vfs_remove("home/note.txt"));
     assert(vfs_kind("home/note.txt")==VFS_MISSING);
     assert(vfs_kind("home/new.txt")==VFS_HOME_WRITABLE);
+    /* Aurora 16: nested writable directories, alias views, metadata and ACLs. */
+    assert(!vfs_mkdir("windows/hacked"));
+    assert(!vfs_mkdir("home/../hacked"));
+    assert(!vfs_mkdir("home/missing/child"));
+    assert(vfs_mkdir("home/projects"));
+    assert(vfs_kind("home/projects")==VFS_DIRECTORY);
+    assert(vfs_kind("my documents/projects")==VFS_DIRECTORY);
+    assert(!vfs_mkdir("home/projects"));
+    assert(!vfs_write("home/projects/.oxpdir","x",1));
+    assert(!vfs_remove("home/projects/.oxpdir"));
+    assert(!vfs_read("home/projects/.oxpdir",out,sizeof(out),&file_len));
+    assert(vfs_mkdir("my documents/projects/archive"));
+    assert(vfs_write("home/projects/readme.txt","123",3));
+    assert(!vfs_rmdir("home/projects"));
+    assert(!vfs_rmdir("home/projects")); /* nested folder exists */
+    vfs_kind_t kind=VFS_MISSING;size_t bytes=999u;
+    assert(vfs_stat("my documents/projects/readme.txt",&bytes,&kind));
+    assert(kind==VFS_HOME_WRITABLE&&bytes==3);
+    assert(vfs_stat("docs/readme.txt",&bytes,&kind)&&kind==VFS_BOOT_READONLY&&bytes>0);
+    assert(vfs_stat("home/projects/archive",&bytes,&kind)&&kind==VFS_DIRECTORY&&bytes==0);
+    assert(!vfs_stat("home/ghost",&bytes,&kind));
+    char listed[96];
+    assert(vfs_list_dir("my documents/projects",0,listed,sizeof(listed)));
+    assert(!strcmp(listed,"my documents/projects/archive") ||
+           !strcmp(listed,"my documents/projects/readme.txt"));
+    assert(vfs_list_dir("home/projects",0,listed,sizeof(listed)));
+    assert(strstr(listed,"/.oxpdir")==NULL);
+    assert(!vfs_write("home/projects/bad/thing","x",1));
+    assert(!vfs_remove("home/projects"));
+    /* Aurora 17: atomic directory-tree rename across aliases, no self-nesting. */
+    assert(!vfs_rename("home/projects","home/projects/archive/deeper"));
+    assert(vfs_rename("my documents/projects","home/renamed"));
+    assert(vfs_kind("home/projects")==VFS_MISSING);
+    assert(vfs_kind("home/renamed")==VFS_DIRECTORY);
+    assert(vfs_kind("home/renamed/archive")==VFS_DIRECTORY);
+    assert(vfs_kind("home/renamed/readme.txt")==VFS_HOME_WRITABLE);
+    assert(!vfs_rename("home","home/nope"));
+    assert(!vfs_rename("home/renamed","windows/renamed"));
+    assert(!vfs_rename("home/renamed","home/renamed/archive"));
+    assert(vfs_remove("home/renamed/readme.txt"));
+    assert(vfs_rmdir("home/renamed/archive"));
+    assert(vfs_rmdir("home/renamed"));
+    assert(vfs_kind("home/projects")==VFS_MISSING);
     assert(vfs_read("docs/readme.txt",docs,sizeof(docs),&file_len));
     initrd_unmount();free(image);
     puts("PASS: OXRD read-only namespace, HOME writes, path validation, copy, rename and delete");

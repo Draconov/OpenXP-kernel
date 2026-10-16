@@ -1,4 +1,5 @@
 #include "oxp.h"
+#include "ui_widgets.h"
 /* Small Ring 3 terminal. File writes are confined by the kernel to HOME. */
 static char input[55],lines[7][55];
 static unsigned used,row,listing_offset;
@@ -62,6 +63,8 @@ static void list(void){
     for(unsigned i=listing_offset;i<listing_offset+5;++i){
         req=(app_file_request_t){0};req.index=i;req.dest[0]='D';
         oxp_copy(req.path,cwd,sizeof req.path);
+        unsigned n=0;while(req.path[n])++n;
+        if(n && req.path[n-1]=='/')req.path[n-1]=0;
         if(oxp_file(APP_FS_LIST,&req))break;
         print(req.path);++displayed;
     }
@@ -83,7 +86,7 @@ static void execute(void){
     print(input);
     if(same(input,"help")){
         print("CD DIR LS CAT COPY REN DEL WRITE TOUCH");
-        print("RUN MEM UPTIME PWD ECHO CLEAR");
+        print("MKDIR RMDIR STAT RUN MEM UPTIME PWD");
     }else if(same(input,"clear")||same(input,"cls")){
         row=0;for(unsigned i=0;i<7;++i)lines[i][0]=0;
     }else if(same(input,"ls")||same(input,"dir"))list();
@@ -94,6 +97,23 @@ static void execute(void){
         here[n]=0;print(here);
     }
     else if(starts(input,"cd "))cd(word(input+3));
+    else if(starts(input,"mkdir ")||starts(input,"rmdir ")){
+        unsigned creating=starts(input,"mkdir ");
+        char path[96];resolve(word(input+(creating?6:6)),path,sizeof path);
+        req=(app_file_request_t){0};oxp_copy(req.path,path,sizeof req.path);
+        print(oxp_file(creating?APP_FS_MKDIR:APP_FS_RMDIR,&req)==0?
+              (creating?"FOLDER CREATED":"EMPTY FOLDER REMOVED"):
+              "FOLDER OP FAILED / NOT EMPTY");
+        listing_offset=0;
+    }else if(starts(input,"stat ")){
+        char path[96];resolve(word(input+5),path,sizeof path);
+        req=(app_file_request_t){0};oxp_copy(req.path,path,sizeof req.path);
+        if(oxp_file(APP_FS_STAT,&req))print("FILE NOT FOUND");
+        else {
+            print(req.index==3u?"DIRECTORY":req.index==2u?"WRITABLE FILE":"READ ONLY FILE");
+            number("SIZE BYTES ",req.size);
+        }
+    }
     else if(same(input,"mem"))number("FREE PAGES ",oxp_call(26,0,0));
     else if(same(input,"uptime"))number("UPTIME SEC ",oxp_ticks()/100);
     else if(starts(input,"echo "))print(input+5);
@@ -148,18 +168,20 @@ static void render(void){
     unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
     oxp_draw_cmd_t shapes[]={
         {OXP_DRAW_CLEAR,0,0,0,0,0x101d30},{OXP_DRAW_FILL,0,0,w,22,0x264c7d}};
-    oxp_draw(shapes,2);oxp_label(9,7,"OPENXP TERMINAL - NATIVE",1,0xffffff);
+    oxp_draw(shapes,2);oxp_ui_appbar(w,"TERMINAL");
     unsigned prompt=h>18u?h-18u:0u;
     unsigned rows=prompt>30u?(prompt-30u)/17u:0u;
     if(rows>7u)rows=7u;
     unsigned count=row<rows?row:rows;
     for(unsigned i=0;i<count;++i)oxp_label(9,30+i*17,lines[(row-count+i)%7],1,0xaddbb3);
-    if(h>15u){oxp_label(9,prompt,">",1,0x82e7b3);oxp_label(20,prompt,input,1,0xd6f4db);}
+    if(h>15u){oxp_fill(0,prompt>5u?prompt-5u:0u,w,1u,oxp_theme_accent(oxp_ui_theme));
+        oxp_label(9,prompt,">",1,0x82e7b3);oxp_label(20,prompt,input,1,0xd6f4db);}
 }
 void oxp_main(void){
     if(oxp_open("Terminal - native ELF64"))oxp_exit(1);
+    oxp_ui_atlas_init_widgets();
     print("TYPE HELP FOR COMMANDS");
-    for(;;){render();uint32_t e=oxp_wait(0);
+    for(;;){render();uint32_t e=oxp_ui_wait_theme();
         if(e==OXP_CLOSE||e==27)break;
         if(e==10){execute();continue;}
         if(e==8){if(used)input[--used]=0;continue;}

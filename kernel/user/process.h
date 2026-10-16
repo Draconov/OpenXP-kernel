@@ -9,6 +9,7 @@
  * separate private CR3 and guarded kernel-entry stack. Preemptible mode
  * requires a dedicated kernel scheduler worker and only the legacy PIC/PIT. */
 #define PROCESS_MAX_SLOTS 4u
+#define PROCESS_LAUNCH_ARG_MAX 96u
 
 typedef enum {
     PROCESS_EMPTY = 0,
@@ -30,6 +31,9 @@ typedef struct {
 bool process_init(void);
 /* Returns nonzero monotonically increasing PID or zero on failure. */
 uint64_t process_create_elf(const void *image, size_t length);
+/* Attach immutable document argument before a READY process starts. */
+bool process_set_launch_arg(uint64_t pid,const char *arg);
+size_t process_current_launch_arg(char *out,size_t cap);
 /* Runs until the program calls EXIT or faults; returns a status snapshot. */
 bool process_run(uint64_t pid, process_info_t *result);
 /* Requires IRQs disabled and a preemptive kernel worker. Ring 3 runs IF=1. */

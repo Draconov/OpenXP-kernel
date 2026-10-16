@@ -56,7 +56,7 @@ kernel-half mappings. User pages must carry the user bit at each page-table
 level; stacks are writable, non-executable and bordered by unmapped guards.
 The normal process stack starts after a guard page at user offset `0x3f0000`
 inside the private 4 MiB range. This leaves native ELF code and its larger
-zero-filled RW/BSS mapping (512 KiB for `windowd`) separate from the stack.
+zero-filled RW/BSS mapping (2 MiB for `windowd`) separate from the stack.
 The layout is defined in `kernel/user/process_layout.h`; the initrd image test
 verifies that bundled ELF segments never overlap the reserved stack pages.
 

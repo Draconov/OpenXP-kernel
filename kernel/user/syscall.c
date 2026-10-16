@@ -1,4 +1,5 @@
 #include "user/syscall.h"
+#include "user/clipboard.h"
 #include "user/userspace.h"
 #include "user/process.h"
 #include "user/capipc.h"
@@ -12,8 +13,19 @@
 #include "fs/vfs.h"
 #include "user/app_file.h"
 #include "user/app_launch.h"
+#include "fs/persist.h"
+#include "fs/ramfs.h"
 #include "arch/x86_64/irq_state.h"
 #include <stddef.h>
+
+static openxp_clipboard_t system_clipboard;
+static volatile bool flush_requested,flush_error;
+static uint64_t last_storage_revision;
+bool user_storage_flush_pending(void){return flush_requested;}
+void user_storage_mark_committed(uint64_t revision){
+    last_storage_revision=revision;flush_requested=false;flush_error=false;
+}
+void user_storage_mark_error(void){flush_error=true;}
 
 /* One intentionally bounded buffer syscall. User addresses are never directly
  * dereferenced in CPL0; page-permission checking precedes the entire write. */
@@ -83,14 +95,46 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         return (struct syscall_result){0,
             native_draw(process_current_pid(),cmds,(size_t)frame->rsi)?0u:(uint64_t)-OPENXP_EINVAL};
     }
+    case OPENXP_SYS_GUI_BITMAP: {
+        const address_space_t *space=userspace_current_space();
+        if(!space || !aspace_range_valid(space,frame->rdi,sizeof(native_bitmap_req_t),false))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        native_bitmap_req_t tile;
+        if(!aspace_copy_from_user(space,&tile,frame->rdi,sizeof tile))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,native_bitmap(process_current_pid(),&tile)?0u:(uint64_t)-OPENXP_EINVAL};
+    }
     case OPENXP_SYS_GUI_CANVAS_SIZE:
         return (struct syscall_result){0,native_canvas_size(process_current_pid())};
+    case OPENXP_SYS_GUI_POINTER:
+        return (struct syscall_result){0, native_pointer_enable(process_current_pid())?0u:(uint64_t)-OPENXP_EPERM};
     case OPENXP_SYS_GUI_EVENT:
         return (struct syscall_result){0,native_next_event(process_current_pid())};
     case OPENXP_SYS_GUI_WAIT:
         if (frame->rdi >= (UINT64_C(1) << 63))
             return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
         return (struct syscall_result){0,native_wait_event(process_current_pid(),frame->rdi)};
+    case OPENXP_SYS_CLIPBOARD_SET: {
+        const address_space_t *space=userspace_current_space();
+        size_t n=(size_t)frame->rsi;
+        if(!space||n>OPENXP_CLIPBOARD_CAP)return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        uint8_t copy[OPENXP_CLIPBOARD_CAP];
+        if(n && (!aspace_range_valid(space,frame->rdi,n,false)||
+                 !aspace_copy_from_user(space,copy,frame->rdi,n)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        (void)openxp_clipboard_put(&system_clipboard,copy,n);
+        return (struct syscall_result){0,n};
+    }
+    case OPENXP_SYS_CLIPBOARD_GET: {
+        address_space_t *space=(address_space_t *)userspace_current_space();
+        size_t n=system_clipboard.length;
+        if(!space)return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        if(n>frame->rsi)return (struct syscall_result){0,(uint64_t)-OPENXP_ENOSPC};
+        if(n && (!aspace_range_valid(space,frame->rdi,n,true)||
+                 !aspace_copy_to_user(space,frame->rdi,system_clipboard.bytes,n)))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,n};
+    }
     case OPENXP_SYS_RAM_READ:
     case OPENXP_SYS_RAM_WRITE: {
         /* Narrow capability: one fixed home document per program, no arbitrary
@@ -127,9 +171,48 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         if(!app_launch_allowed(path))return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
         return (struct syscall_result){0,app_launch_submit(path)?0:(uint64_t)-OPENXP_EAGAIN};
     }
+    case OPENXP_SYS_APP_LAUNCH_ARG: {
+        const address_space_t *space=userspace_current_space();
+        app_launch_request_t req;
+        if(!space || !aspace_range_valid(space,frame->rdi,sizeof req,false) ||
+           !aspace_copy_from_user(space,&req,frame->rdi,sizeof req))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        bool executable_end=false,argument_end=false;
+        for(size_t i=0;i<sizeof req.executable;++i)
+            if(req.executable[i]==0)executable_end=true;
+        for(size_t i=0;i<sizeof req.argument;++i)
+            if(req.argument[i]==0)argument_end=true;
+        if(!executable_end || !argument_end || !req.argument[0])
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(!app_launch_allowed(req.executable))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EPERM};
+        return (struct syscall_result){0,app_launch_submit_with_arg(req.executable,req.argument)?
+            0:(uint64_t)-OPENXP_EAGAIN};
+    }
+    case OPENXP_SYS_APP_GET_ARG: {
+        address_space_t *space=(address_space_t *)userspace_current_space();
+        char argument[PROCESS_LAUNCH_ARG_MAX]={0};
+        size_t n=process_current_launch_arg(argument,sizeof argument);
+        if(!n)return (struct syscall_result){0,0};
+        if(!space || frame->rsi<=n)return (struct syscall_result){0,(uint64_t)-OPENXP_ENOSPC};
+        if(!aspace_range_valid(space,frame->rdi,n+1u,true) ||
+           !aspace_copy_to_user(space,frame->rdi,argument,n+1u))
+            return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
+        return (struct syscall_result){0,n};
+    }
+    case OPENXP_SYS_STORAGE: {
+        if(frame->rdi>1u)return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
+        if(!persist_is_mounted())return (struct syscall_result){0,0};
+        if(frame->rdi==1u)flush_requested=true;
+        uint64_t flags=OPENXP_STORAGE_PRESENT;
+        if(ramfs_revision()!=last_storage_revision)flags|=OPENXP_STORAGE_DIRTY;
+        if(flush_requested)flags|=OPENXP_STORAGE_QUEUED;
+        if(flush_error)flags|=OPENXP_STORAGE_ERROR;
+        return (struct syscall_result){0,flags};
+    }
     case OPENXP_SYS_FS_OP: {
         const address_space_t *space=userspace_current_space();
-        if(!space || frame->rdi<APP_FS_LIST || frame->rdi>APP_FS_READ_SLICE)
+        if(!space || frame->rdi<APP_FS_LIST || frame->rdi>APP_FS_STAT)
             return (struct syscall_result){0,(uint64_t)-OPENXP_EINVAL};
         if(!aspace_range_valid(space,frame->rsi,sizeof(app_file_request_t),true))
             return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
@@ -182,11 +265,24 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
         case APP_FS_KIND:
             result=(uint64_t)vfs_kind(req.path);
             break;
+        case APP_FS_MKDIR:
+            result=vfs_mkdir(req.path)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_RMDIR:
+            result=vfs_rmdir(req.path)?0:(uint64_t)-OPENXP_EPERM;
+            break;
+        case APP_FS_STAT: {
+            size_t bytes=0;vfs_kind_t kind=VFS_MISSING;
+            bool ok=vfs_stat(req.path,&bytes,&kind) && bytes<=UINT32_MAX;
+            if(ok){req.index=(uint32_t)kind;req.size=(uint32_t)bytes;}
+            result=ok?0:(uint64_t)-OPENXP_EINVAL;
+            break;
+        }
         default:result=(uint64_t)-OPENXP_EINVAL;break;
         }
         irq_restore(saved);
         if(frame->rdi==APP_FS_LIST || frame->rdi==APP_FS_READ ||
-           frame->rdi==APP_FS_READ_SLICE){
+           frame->rdi==APP_FS_READ_SLICE || frame->rdi==APP_FS_STAT){
             if(!result && !aspace_copy_to_user((address_space_t *)space,frame->rsi,&req,sizeof(req)))
                 return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
         }
@@ -271,6 +367,8 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
             info.active=snapshot.active?1u:0u;
             info.painted=native_has_surface(slot)?1u:0u;
             info.generation=snapshot.content_generation;
+            info.surface_w=snapshot.surface_w;
+            info.surface_h=snapshot.surface_h;
             for(unsigned i=0;i<sizeof(info.title);++i)info.title[i]=snapshot.title[i];
             for(unsigned i=0;i<sizeof(info.text);++i)info.text[i]=snapshot.text[i];
             return (struct syscall_result){0,

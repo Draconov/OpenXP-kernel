@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import sys
 
-WINDOWD_RW_BYTES = 512 * 1024
+WINDOWD_RW_BYTES = 2 * 1024 * 1024
 
 def check_map(contents: str) -> int:
     matches = re.findall(r"^\s*[0-9a-fA-F]+\s+[0-9a-fA-F]+\s+([0-9a-fA-F]+)\s+\d+\s+\.bss\s*$", contents, re.M)

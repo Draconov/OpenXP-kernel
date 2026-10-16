@@ -14,24 +14,28 @@ static void caption(oxp_shell_draw_t *c,unsigned x,unsigned y,const char *s){
     while(i<OXP_SHELL_TEXT_MAX-1u && s[i] && (unsigned char)s[i]>=32u && (unsigned char)s[i]<=126u){c->text[i]=s[i];++i;}
 }
 static void draw_window_row(const oxp_shell_window_t *w,const oxp_native_info_t *info,
-                            const uint16_t *surface,unsigned y,uint16_t *dst){
+                            const uint16_t *surface,unsigned y,uint16_t *dst,
+                            const oxp_skin_t *skin,int32_t pointer_x,int32_t pointer_y,int pressed){
     if(!w->visible || w->minimized || !info->active ||
        !w->width || !w->height || w->x>=W || w->y>=H)return;
+    int themed=skin && skin->count;
     oxp_shell_draw_t cmds[18]={0};
     unsigned n=0;
     cmd(&cmds[n++],OXP_SHELL_RECT,w->x+4u,w->y+5u,w->width,w->height,0x12405au);
-    cmd(&cmds[n++],OXP_SHELL_RECT,w->x,w->y,w->width,w->height,0x2a518fu);
-    if(w->width>2u && w->height>2u)
+    if(themed && w->width>12u && w->height>12u)
+        cmd(&cmds[n++],OXP_SHELL_RECT,w->x+5u,w->y+3u,w->width-10u,w->height-9u,0xe5edf8u);
+    else cmd(&cmds[n++],OXP_SHELL_RECT,w->x,w->y,w->width,w->height,0x2a518fu);
+    if(!themed && w->width>2u && w->height>2u)
         cmd(&cmds[n++],OXP_SHELL_RECT,w->x+1u,w->y+1u,w->width-2u,w->height-2u,0xdee7f3u);
-    if(w->width>6u && w->height>33u)
+    if(!themed && w->width>6u && w->height>33u)
         cmd(&cmds[n++],OXP_SHELL_RECT,w->x+3u,w->y+3u,w->width-6u,28u,
             w->active?0x1158c3u:0x617695u);
-    caption(&cmds[n++],w->x+13u,w->y+11u,info->title);
-    if(w->width>60u){
+    if(!themed)caption(&cmds[n++],w->x+13u,w->y+11u,info->title);
+    if(!themed && w->width>60u){
         cmd(&cmds[n++],OXP_SHELL_RECT,w->x+w->width-28u,w->y+6u,21u,21u,0xc03f3du);
         caption(&cmds[n++],w->x+w->width-22u,w->y+13u,"X");
     }
-    if(w->width>88u){
+    if(!themed && w->width>88u){
         cmd(&cmds[n++],OXP_SHELL_RECT,w->x+w->width-80u,w->y+6u,21u,21u,0x4f85cbu);
         caption(&cmds[n++],w->x+w->width-74u,w->y+13u,"-");
         cmd(&cmds[n++],OXP_SHELL_RECT,w->x+w->width-54u,w->y+6u,21u,21u,0x4f85cbu);
@@ -51,12 +55,49 @@ static void draw_window_row(const oxp_shell_window_t *w,const oxp_native_info_t 
     uint16_t row[W];
     oxp_raster_row(cmds,n,OXP_SHELL_LAYER_OVERLAY,y,row);
     for(unsigned x=0;x<W;++x)if(row[x]!=KEY)dst[x]=row[x];
+    if(themed){
+        /* The reusable 9-slice preserves corner radii and top/bottom frame
+         * art while stretching only the middle of the image.  Both active
+         * and inactive states use the exact same window geometry. */
+        (void)oxp_skin_nine_row(skin,w->active?OXP_SKIN_FRAME_ACTIVE:OXP_SKIN_FRAME_INACTIVE,
+                               w->x,w->y,w->width,w->height,y,dst,W);
+        oxp_shell_draw_t label={0};
+        caption(&label,w->x+13u,w->y+11u,info->title);
+        oxp_raster_row(&label,1,OXP_SHELL_LAYER_OVERLAY,y,row);
+        for(unsigned x=0;x<W;++x)if(row[x]!=KEY)dst[x]=row[x];
+        /* Atlas rows: minimize/maximize/close.  Columns: normal, hovered,
+         * pressed. Painting and hit testing share the legacy 21px geometry. */
+        if(w->width>88u){
+            for(unsigned b=0;b<3u;++b){
+                unsigned bx=w->x+w->width-(80u-26u*b);
+                unsigned by=w->y+6u;
+                unsigned state=0;
+                if(pointer_x>=(int32_t)bx && pointer_x<(int32_t)(bx+21u) &&
+                   pointer_y>=(int32_t)by && pointer_y<(int32_t)(by+21u))
+                    state=pressed?2u:1u;
+                (void)oxp_skin_region_row(skin,OXP_SKIN_CAPTION_ATLAS,
+                    state*24u,b*24u,24u,24u,bx,by,21u,21u,y,dst,W);
+            }
+        }else if(w->width>60u){
+            unsigned bx=w->x+w->width-28u,by=w->y+6u;
+            unsigned state=0;
+            if(pointer_x>=(int32_t)bx && pointer_x<(int32_t)(bx+21u) &&
+               pointer_y>=(int32_t)by && pointer_y<(int32_t)(by+21u))
+                state=pressed?2u:1u;
+            (void)oxp_skin_region_row(skin,OXP_SKIN_CAPTION_ATLAS,
+                state*24u,48u,24u,24u,bx,by,21u,21u,y,dst,W);
+        }
+    }
     /* Framebuffer scanout performs nearest-neighbour scaling of the native
      * logical canvas. The viewport is centred with undistorted pixels, while
      * unused client space retains the themed background. */
     oxp_native_viewport_t view=oxp_native_viewport(w->x,w->y,w->width,w->height);
     if(view.w && y>=view.y && y-view.y<view.h && view.x<W){
         oxp_native_canvas_t canvas=oxp_native_canvas(w->width,w->height);
+        if(info->painted && info->surface_w && info->surface_h &&
+           info->surface_w<=OXP_NATIVE_W && info->surface_h<=OXP_NATIVE_H){
+            canvas.w=info->surface_w;canvas.h=info->surface_h;
+        }
         unsigned sy=(unsigned)((uint64_t)(y-view.y)*canvas.h/view.h);
         unsigned columns=view.w;
         if(columns>W-view.x)columns=W-view.x;
@@ -99,10 +140,11 @@ static void draw_window_row(const oxp_shell_window_t *w,const oxp_native_info_t 
         }
     }
 }
-void oxp_native_scene_row(const oxp_shell_window_t windows[OXP_NATIVE_SLOTS],
+void oxp_native_scene_row_skinned(const oxp_shell_window_t windows[OXP_NATIVE_SLOTS],
                           const oxp_native_info_t infos[OXP_NATIVE_SLOTS],
                           const uint16_t surfaces[OXP_NATIVE_SLOTS][OXP_NATIVE_W*OXP_NATIVE_H],
-                          unsigned y,uint16_t dst[W]){
+                          unsigned y,uint16_t dst[W],const oxp_skin_t *skin,
+                          int32_t pointer_x,int32_t pointer_y,int pressed){
     if(!dst || y>=H)return;
     for(unsigned x=0;x<W;++x)dst[x]=KEY;
     if(!windows || !infos || !surfaces)return;
@@ -117,6 +159,14 @@ void oxp_native_scene_row(const oxp_shell_window_t windows[OXP_NATIVE_SLOTS],
             if(rank==order){pick=i;break;}
         }
         if(pick<OXP_NATIVE_SLOTS)
-            draw_window_row(&windows[pick],&infos[pick],surfaces[pick],y,dst);
+            draw_window_row(&windows[pick],&infos[pick],surfaces[pick],y,dst,
+                            skin,pointer_x,pointer_y,pressed);
     }
+}
+
+void oxp_native_scene_row(const oxp_shell_window_t windows[OXP_NATIVE_SLOTS],
+                          const oxp_native_info_t infos[OXP_NATIVE_SLOTS],
+                          const uint16_t surfaces[OXP_NATIVE_SLOTS][OXP_NATIVE_W*OXP_NATIVE_H],
+                          unsigned y,uint16_t dst[W]){
+    oxp_native_scene_row_skinned(windows,infos,surfaces,y,dst,0,-1,-1,0);
 }

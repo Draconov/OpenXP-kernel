@@ -86,7 +86,10 @@ def main() -> None:
                 b"Mouse and keyboard use legacy PS/2.\n")]
     for app in args.native:
         entries.append(("bin/" + app.stem, elf_from_native_flat(
-            app.read_bytes(), 512 * 1024 if app.stem == "windowd" else 32768)))
+            app.read_bytes(), 2 * 1024 * 1024 if app.stem == "windowd" else
+            256 * 1024 if app.stem in ("run", "settings", "filemanager", "wordpad",
+                                     "calculator", "notepad", "calendar", "paint",
+                                     "terminal", "clock", "monitor", "about") else 32768)))
     if args.wallpaper_dir.is_dir():
         for image in sorted(args.wallpaper_dir.glob("*.bmp")):
             content = image.read_bytes()
@@ -104,6 +107,30 @@ def main() -> None:
                offset + (((w * 3 + 3) // 4) * 4) * h != len(content):
                 raise ValueError(f"bad wallpaper dimensions/data: {image}")
             entries.append((f"windows/web/wallpaper/{image.name}", content))
+    # Bundle all three complete appearances. Paths are deliberately stable:
+    # settings stores only the numeric theme ID, and all resources are
+    # immutable initrd entries. No kernel-side PNG decoder is needed.
+    font_path=args.output.parent / "skin" / "aurora-font.oxft"
+    data=font_path.read_bytes()
+    if not (len(data)>16 and data[:4]==b"OXFT"):
+        raise ValueError("invalid Aurora bitmap-font resource")
+    entries.append(("windows/resources/aurora-font.oxft",data))
+    for theme_name in ("aurora", "olive", "midnight"):
+        pack_root=args.output.parent / "skin"
+        skin_path=pack_root/(theme_name+".oxs")
+        if not skin_path.is_file():
+            raise ValueError(f"missing generated skin: {skin_path}")
+        data=skin_path.read_bytes()
+        if not (16 <= len(data) <= 65536 and data[:4]==b"OXSK"):
+            raise ValueError(f"invalid {theme_name} skin resource")
+        entries.append((f"windows/resources/{theme_name}.oxs",data))
+        for kind in ("widgets", "icons", "chrome", "menu", "toolbar"):
+            filename=f"{theme_name}-{kind}.oxua"
+            atlas=pack_root/filename
+            data=atlas.read_bytes()
+            if len(data)<16 or data[:4]!=b"OXUA":
+                raise ValueError(f"invalid {filename} atlas")
+            entries.append(("windows/resources/"+filename,data))
     args.output.write_bytes(pack_archive(entries))
 
 if __name__ == "__main__":

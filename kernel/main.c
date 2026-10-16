@@ -18,6 +18,7 @@
 #include "user/userspace.h"
 #include "fs/initrd.h"
 #include "user/app_launch.h"
+#include "user/syscall.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
 #include "fs/persist.h"
@@ -101,7 +102,7 @@ static void native_worker(void *opaque) {
     job->occupied=false;
     irq_restore(flags);
 }
-static bool shell_launch(void *ctx,const char *path) {
+static bool shell_launch_with_arg(void *ctx,const char *path,const char *argument) {
     (void)ctx;
     const void *image=NULL;size_t bytes=0;
     const char *alias=vfs_executable_target(path);
@@ -122,6 +123,9 @@ static bool shell_launch(void *ctx,const char *path) {
        !capipc_grant_server(pid)) {
         (void)process_cancel_ready(pid);irq_restore(flags);return false;
     }
+    if(argument && *argument && !process_set_launch_arg(pid,argument)){
+        (void)process_cancel_ready(pid);irq_restore(flags);return false;
+    }
     job->pid=pid;job->occupied=true;
     if(!scheduler_create(native_worker,job)) {
         (void)process_cancel_ready(pid);
@@ -131,6 +135,9 @@ static bool shell_launch(void *ctx,const char *path) {
     }
     irq_restore(flags);
     return true;
+}
+static bool shell_launch(void *ctx,const char *path){
+    return shell_launch_with_arg(ctx,path,NULL);
 }
 static bool shell_process_entry(void *ctx,size_t slot,uint64_t *pid,unsigned *state){
     (void)ctx;
@@ -167,6 +174,9 @@ static void pci_report(void *ctx,const pci_device_t *d){
 }
 static bool disk_attached;
 static uint64_t saved_ramfs_revision;
+#ifdef OPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE
+static uint64_t last_disk_commit_attempt;
+#endif
 static void desktop_interactive_loop(void) __attribute__((noreturn));
 static void desktop_interactive_loop(void) {
     shell_services_t services={.ticks=shell_ticks,.free_pages=shell_free,.file_count=shell_count,
@@ -303,9 +313,9 @@ static void desktop_interactive_loop(void) {
             serial_puts("OPENXP_RING3_NATIVE_PIXELS_READY\n");
             native_pixels_announced=true;
         }
-        char requested_app[48];
-        if(app_launch_take(requested_app,sizeof(requested_app)))
-            (void)shell_launch(NULL,requested_app);
+        app_launch_request_t request;
+        if(app_launch_take_request(&request))
+            (void)shell_launch_with_arg(NULL,request.executable,request.argument);
         /* A live Ring 3 native layer is presented only when windowd has
            published a new coherent image. App-surface writes must not trigger
            another full redraw of the *old* native layer: repeated old-frame
@@ -374,9 +384,18 @@ static void desktop_interactive_loop(void) {
         /* Optional, explicitly enabled secondary IDE disk: commit snapshots
          * at most every 2s. Never write to an unrecognized system disk. */
 #ifdef OPENXP_ENABLE_EXPERIMENTAL_IDE_STORAGE
-        if(disk_attached && (now%200u)==0u && ramfs_revision()!=saved_ramfs_revision) {
+        if(disk_attached && (ramfs_revision()!=saved_ramfs_revision ||
+                             user_storage_flush_pending()) &&
+           (uint64_t)(now-last_disk_commit_attempt)>=
+                 (user_storage_flush_pending()?25u:200u)) {
+            /* Never perform slow ATA I/O from a Ring 3 syscall handler.
+             * Enforce a retry interval even after disk errors. */
+            last_disk_commit_attempt=now;
             uint64_t revision=ramfs_revision();
-            if(persist_commit())saved_ramfs_revision=revision;
+            if(persist_commit()){
+                saved_ramfs_revision=revision;
+                user_storage_mark_committed(revision);
+            }else user_storage_mark_error();
         }
 #endif
         uint64_t last_snake_step=desktop.snake_last_step;
@@ -749,6 +768,7 @@ void _start(void) {
     }
 #endif
     saved_ramfs_revision=ramfs_revision();
+    user_storage_mark_committed(saved_ramfs_revision);
     size_t pci_count=pci_enumerate(pci_config_read_io,0,pci_report,0);
     serial_puts("OpenXP PCI devices discovered: ");serial_u64(pci_count);
     serial_puts(" (read-only detection)\n");

@@ -89,17 +89,34 @@ int main(void) {
     assert(native_canvas_size(45)==0); /* PID ownership, not raw slot */
     native_set_window_size(1,1024u,726u);
     uint64_t size=native_canvas_size(100);
-    assert((unsigned)(size>>32)<320u && (unsigned)size==180u);
+    assert((unsigned)(size>>32)>320u && (unsigned)size==360u);
     assert(native_next_event(100)==NATIVE_EVENT_RESIZE);
     assert(native_has_surface(1)); /* no flickering during resize */
     assert(native_test_pixel(1,3,5)==0xf800);
+    assert(native_snapshot_slot(1).surface_w==320u);
+    assert(native_snapshot_slot(1).surface_h==180u);
     native_set_window_size(1,1024u,726u); /* idempotent */
     assert(native_next_event(100)==0);
     native_set_window_size(1,640u,190u);
     size=native_canvas_size(100);
-    assert((unsigned)(size>>32)==320u && (unsigned)size<180u);
+    assert((unsigned)(size>>32)==NATIVE_SURFACE_W && (unsigned)size<180u);
     assert(native_next_event(100)==NATIVE_EVENT_RESIZE);
     assert(native_canvas_size(42)==((uint64_t)320<<32|180u));
+    /* New backing pixels above the historic 320x180 limit must survive
+     * through the process-owned scanline syscall, not just layout math. */
+    native_set_window_size(1,1024u,726u);
+    assert(native_next_event(100)==NATIVE_EVENT_RESIZE);
+    uint32_t expanded_w=(uint32_t)(native_canvas_size(100)>>32);
+    uint32_t expanded_h=(uint32_t)native_canvas_size(100);
+    assert(expanded_w>320u && expanded_h>180u);
+    native_draw_cmd_t high_pixel={NATIVE_DRAW_FILL,expanded_w-1u,expanded_h-1u,1,1,0x00ff00};
+    assert(native_draw(100,&high_pixel,1));
+    assert(native_snapshot_slot(1).surface_w==expanded_w);
+    assert(native_snapshot_slot(1).surface_h==expanded_h);
+    assert(native_test_pixel(1,expanded_w-1u,expanded_h-1u)==0x07e0u);
+    uint16_t high_row[NATIVE_SURFACE_W];
+    assert(native_copy_surface_row(1,expanded_h-1u,high_row,NATIVE_SURFACE_W));
+    assert(high_row[expanded_w-1u]==0x07e0u);
     assert(!native_copy_surface_row(1,NATIVE_SURFACE_H,row,NATIVE_SURFACE_W));
     assert(!native_copy_surface_row(1,5,row,NATIVE_SURFACE_W-1));
     native_draw_cmd_t bad[]={
@@ -118,6 +135,29 @@ int main(void) {
     assert(!native_has_surface(1));
     /* Recycled slot must start cleared, not leak predecessor pixels. */
     assert(native_open(101,"Another",7));
+    /* RGBA bitmap upload: alpha, bounds, ownership and transparent key. */
+    native_bitmap_req_t bt={0};
+    bt.x=5;bt.y=5;bt.w=2;bt.h=1;
+    bt.pixels[0]=0x00;bt.pixels[1]=0xf8;bt.pixels[2]=255; /* red */
+    bt.pixels[3]=0x1f;bt.pixels[4]=0x00;bt.pixels[5]=0;   /* transparent blue */
+    assert(native_bitmap(101,&bt));
+    assert(native_test_pixel(1,5,5)==0xf800u);
+    assert(native_test_pixel(1,6,5)==0u);
+    bt.w=1;
+    bt.pixels[0]=0xe0;bt.pixels[1]=0x07;bt.pixels[2]=128; /* half-green over red */
+    assert(native_bitmap(101,&bt));
+    uint16_t mixed=native_test_pixel(1,5,5);
+    assert(mixed!=0xf800u && mixed!=0x07e0u && mixed!=0x0001u);
+    bt.pixels[0]=1;bt.pixels[1]=0;bt.pixels[2]=255;
+    assert(native_bitmap(101,&bt));
+    assert(native_test_pixel(1,5,5)==0); /* transparent compositor key protection */
+    bt.w=2;
+
+    assert(!native_bitmap(999,&bt));
+    bt.x=NATIVE_SURFACE_W-1u;assert(!native_bitmap(101,&bt));
+    bt.x=5;bt.w=33;assert(!native_bitmap(101,&bt));
+    bt.w=2;bt.h=33;assert(!native_bitmap(101,&bt));
+    bt.h=1;
     native_draw_cmd_t little={NATIVE_DRAW_FILL,3,5,1,1,0xff0000};
     assert(native_draw(101,&little,1));
     assert(native_test_pixel(1,3,5)==0xf800);

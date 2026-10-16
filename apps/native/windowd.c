@@ -1,9 +1,15 @@
 #include "oxp.h"
 #include "wm_protocol.h"
+#include "file_workflow.h"
 #include "theme.h"
 #include "wallpaper.h"
 #include "shell_raster.h"
 #include "native_scene.h"
+#include "skin.h"
+#include "shell_icons.h"
+#include "shell_menu_art.h"
+#include "shell_layout.h"
+#include "shell_interaction.h"
 #include "../../kernel/user/wm_display.h"
 #include "../../kernel/user/shell_abi.h"
 #include "../../kernel/input/input.h"
@@ -15,12 +21,49 @@
 static wm_state_t state;
 static uint64_t channels[WM_SERVICE_CHANNELS];
 static uint32_t shell_theme;
+static uint8_t shell_font_blob[OXP_FONT_BYTES];
+static oxp_font_t shell_font;
+static int previous_valid;
+static int native_scene_valid;
 /* Decoded, downsampled RGB565 image; no raw framebuffer mapping in Ring 3. */
 static uint16_t wallpaper_pixels[OXP_WALL_W*OXP_WALL_H];
 static int wallpaper_active;
 static unsigned last_wallpaper_generation,wallpaper_generation;
 static unsigned wallpaper_ordinal;
 static char wallpaper_path[96];
+/* Built-in OXSK assets live in the read-only initrd.  Missing/corrupt
+ * resources fall back to the old procedural UI; never prevent shell boot. */
+static uint8_t skin_blob[OXP_SKIN_MAX_BYTES];
+static oxp_skin_t skin;
+static int skin_loaded;
+static int32_t skin_mouse_x,skin_mouse_y;
+static int skin_pressed;
+static int skin_input_changed;
+static int skin_last_hover;
+/* The 36 KiB OXUA icon atlas is kept read-only by convention after loading.
+ * It lives in the WM's bounded RW memory, not in privileged kernel memory. */
+static uint8_t desktop_icons_blob[OXP_SHELL_ICON_BYTES];
+static oxp_shell_icons_t desktop_icons;
+static int icons_loaded;
+static uint8_t menu_art_blob[OXP_MENU_ART_BYTES];
+static oxp_menu_art_t menu_art;
+static int menu_art_loaded;
+static oxp_shell_window_t shell_windows[17];
+static int menu_visible;
+static uint32_t menu_cursor;
+static int desktop_hover;
+static unsigned desktop_icons_enabled;
+static char dragged_document[52];
+static uint64_t drag_document_tick;
+static int drag_document_x,drag_document_y,drag_document_active;
+static int menu_hover;
+/* Hover/press states are transient and never persisted with appearance packs.
+ * A release on another control cancels the original press. */
+static int start_hover,task_hover=-1;
+static int shell_press_target=-1;
+static unsigned start_glow;
+static int background_visual_dirty,overlay_visual_dirty;
+
 static int selected_wallpaper_path(unsigned index,char *path){
     for(unsigned i=0,match=0;i<32u;++i){
         app_file_request_t request={0};
@@ -46,6 +89,48 @@ static int bmp_reader(void *context,uint32_t offset,void *out,uint32_t count){
         for(uint32_t i=0;i<amount;++i)dst[i]=req.data[i];
         offset+=amount;dst+=amount;count-=amount;
     }
+    return 1;
+}
+static void load_shell_font(void){
+    const char *path="windows/resources/aurora-font.oxft";
+    if(bmp_reader((void *)path,0,shell_font_blob,sizeof shell_font_blob) &&
+       oxp_font_parse(&shell_font,shell_font_blob,sizeof shell_font_blob))
+        oxp_raster_set_font(&shell_font);
+    else oxp_raster_set_font(0);
+}
+static int load_shell_icons(unsigned theme){
+    const char *path=oxp_theme_icons_path(theme);
+    icons_loaded=bmp_reader((void *)path,0,desktop_icons_blob,OXP_SHELL_ICON_BYTES) &&
+                 oxp_shell_icons_parse(&desktop_icons,desktop_icons_blob,
+                                       sizeof desktop_icons_blob);
+    return icons_loaded;
+}
+static int load_menu_art(unsigned theme){
+    const char *path=oxp_theme_menu_path(theme);
+    menu_art_loaded=bmp_reader((void *)path,0,menu_art_blob,OXP_MENU_ART_BYTES) &&
+        oxp_menu_art_parse(&menu_art,menu_art_blob,sizeof menu_art_blob);
+    if(!menu_art_loaded)menu_art.pixels=0;
+    return menu_art_loaded;
+}
+static int load_aurora_skin(unsigned theme){
+    const char *path=oxp_theme_skin_path(theme);
+    skin_loaded=oxp_skin_load(&skin,skin_blob,bmp_reader,(void *)path);
+    return skin_loaded;
+}
+/* Only mutate current pack after checking requested replacement. If a
+ * resource is unexpectedly broken, restore the previous good selection. */
+static int use_theme_art(unsigned requested){
+    unsigned original=shell_theme;
+    if(!load_aurora_skin(requested) || !load_shell_icons(requested)){
+        (void)load_aurora_skin(original);
+        (void)load_shell_icons(original);
+        return 0;
+    }
+    /* Menu artwork is optional: corruption never blocks theme changes. */
+    (void)load_menu_art(requested);
+    shell_theme=requested;
+    /* Same window geometry, but new pixel colors; invalidate both caches. */
+    previous_valid=0;native_scene_valid=0;
     return 1;
 }
 static int apply_wallpaper(unsigned ordinal){
@@ -102,27 +187,62 @@ static int accept_pending(void){
 static int service_one(unsigned slot){
     uint64_t channel=channels[slot];
     if(!channel)return 0;
+    uint8_t wire[64]={0};
+    int64_t count=oxp_recv(channel,wire,sizeof wire);
     wm_packet_t request={0};
-    int64_t count=oxp_recv(channel,&request,sizeof(request));
+    if(count==(int64_t)sizeof request){
+        for(unsigned i=0;i<sizeof request;++i)((uint8_t *)&request)[i]=wire[i];
+    }
     if(count==-11)return 0;
     if(count<=0){drop_channel(slot);return 1;}
     wm_packet_t reply={0};
-    if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
+    if(count==(int64_t)sizeof(wm_drag_packet_t)){
+        wm_drag_packet_t packet={0};
+        for(unsigned i=0;i<sizeof packet;++i)((uint8_t *)&packet)[i]=wire[i];
+        reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
+            .operation=WM_DRAG_BEGIN|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
+        int terminated=0;
+        for(unsigned i=0;i<sizeof packet.path;++i)if(!packet.path[i])terminated=1;
+        if(terminated && packet.magic==WM_MAGIC && packet.version==WM_VERSION &&
+           packet.operation==WM_DRAG_BEGIN){
+            app_file_request_t check={0};
+            oxp_copy(check.path,packet.path,sizeof check.path);
+            int64_t kind=oxp_file(APP_FS_KIND,&check);
+            if((kind==1 || kind==2) && oxp_doc_program(packet.path)){
+                oxp_copy(dragged_document,packet.path,sizeof dragged_document);
+                drag_document_tick=oxp_ticks();
+                drag_document_x=skin_mouse_x;drag_document_y=skin_mouse_y;
+                drag_document_active=1;
+                reply.status=WM_OK;
+            }
+        }
+    }else if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
        request.version==WM_VERSION && request.operation==WM_THEME){
         reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_THEME|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
-        if(oxp_theme_valid(request.x) &&
-           (int64_t)oxp_call(23,OXP_SHELL_THEME,request.x)==0){
-            shell_theme=request.x;
-            wallpaper_active=0;
-            ++wallpaper_generation;
-            reply.status=WM_OK;
+        unsigned prior=shell_theme;
+        if(oxp_theme_valid(request.x) && use_theme_art(request.x)){
+            if((int64_t)oxp_call(23,OXP_SHELL_THEME,request.x)==0){
+                wallpaper_active=0;
+                ++wallpaper_generation;
+                reply.status=WM_OK;
+            }else (void)use_theme_art(prior);
         }
     }else if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
              request.version==WM_VERSION && request.operation==WM_WALLPAPER){
         reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_WALLPAPER|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
         if(request.x<32u && apply_wallpaper(request.x))reply.status=WM_OK;
+    }else if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
+             request.version==WM_VERSION && request.operation==WM_DESKTOP){
+        reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
+            .operation=WM_DESKTOP|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
+        if(request.x<=1u){
+            desktop_icons_enabled=request.x;
+            desktop_hover=-1;
+            background_visual_dirty=1;previous_valid=0;native_scene_valid=0;
+            reply.status=WM_OK;
+        }
     }else if(count==(int64_t)sizeof(request)) {
         wm_packet_t before={.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_QUERY,.window_id=request.window_id};
@@ -194,6 +314,40 @@ static int layer_changed(unsigned layer){
         ++a;++b;
     }
 }
+/* The same placements are used for artwork and hit-testing, so swapping an
+ * icon sprite never changes which action the user activates. */
+static void draw_shell_icon_rows(unsigned layer,unsigned y,uint16_t *pixels){
+    if(!icons_loaded)return;
+    if(layer==0){
+        if(!desktop_icons_enabled)return;
+        for(unsigned i=0;i<OXP_DESKTOP_COUNT;++i)
+            oxp_shell_icon_row(&desktop_icons,oxp_desktop_icon(i),
+                OXP_DESKTOP_X+32u,OXP_DESKTOP_TOP+i*OXP_DESKTOP_STEP+10u,
+                36u,y,pixels,OXP_SHELL_RASTER_W);
+    }else{
+        if(menu_visible){
+            for(unsigned i=0;i<OXP_MENU_ITEMS;++i){
+                unsigned xx=OXP_MENU_ROW_X+(i/7u)*OXP_MENU_COLUMN_W;
+                unsigned yy=OXP_MENU_ROW_Y+(i%7u)*OXP_MENU_ROW_STEP;
+                oxp_shell_icon_row(&desktop_icons,oxp_menu_icon(i),
+                                   xx+7u,yy+3u,31u,y,pixels,OXP_SHELL_RASTER_W);
+            }
+        }
+        unsigned slot=0,count=0;
+        for(unsigned i=0;i<17u;++i)if(shell_windows[i].visible)++count;
+        unsigned bw=count?(SHELL_W-216u)/count:1u;
+        if(bw>142u)bw=142u;
+        if(!bw)bw=1u;
+        for(unsigned i=0;i<17u;++i){
+            if(!shell_windows[i].visible)continue;
+            unsigned bx=115u+slot++*bw;
+            if(bw>=31u)
+                oxp_shell_icon_row(&desktop_icons,(i<14u?oxp_menu_icon(i):11u),
+                                   bx+5u,SHELL_TASK_TOP+12u,18u,y,pixels,
+                                   OXP_SHELL_RASTER_W);
+        }
+    }
+}
 static int publish_pixel_layers(unsigned mask){
     for(unsigned layer=0;layer<2;++layer){
         if(!(mask&(1u<<layer)))continue;
@@ -206,7 +360,47 @@ static int publish_pixel_layers(unsigned mask){
                     raster_row.pixels[x]=wallpaper_pixels[sy*OXP_WALL_W+
                                                        x*OXP_WALL_W/OXP_SHELL_RASTER_W];
                 oxp_raster_overlay_background(shell_frame,drawn,y,raster_row.pixels);
+            }else if(layer==1 && skin_loaded && y>=SHELL_TASK_TOP){
+                for(unsigned x=0;x<OXP_SHELL_RASTER_W;++x)
+                    raster_row.pixels[x]=OXP_SHELL_TRANSPARENT;
+                (void)oxp_skin_nine_row(&skin,OXP_SKIN_TASKBAR,0u,SHELL_TASK_TOP,
+                    SHELL_W,42u,y,raster_row.pixels,OXP_SHELL_RASTER_W);
+                (void)oxp_skin_nine_row(&skin,OXP_SKIN_START,2u,SHELL_TASK_TOP+4u,
+                    105u,35u,y,raster_row.pixels,OXP_SHELL_RASTER_W);
+                oxp_raster_over_row(shell_frame,drawn,layer,y,raster_row.pixels);
+            }else if(layer==1u && menu_visible && menu_art_loaded &&
+                     y>=OXP_MENU_Y && y<OXP_MENU_Y+OXP_MENU_H){
+                for(unsigned x=0;x<OXP_SHELL_RASTER_W;++x)
+                    raster_row.pixels[x]=OXP_SHELL_TRANSPARENT;
+                (void)oxp_menu_art_row(&menu_art,OXP_MENU_ART_PANEL,
+                      OXP_MENU_X,OXP_MENU_Y,OXP_MENU_W,OXP_MENU_H,y,
+                      raster_row.pixels,OXP_SHELL_RASTER_W);
+                (void)oxp_menu_art_row(&menu_art,OXP_MENU_ART_HEADER,
+                      OXP_MENU_X+2u,OXP_MENU_Y+2u,OXP_MENU_W-4u,47u,y,
+                      raster_row.pixels,OXP_SHELL_RASTER_W);
+                (void)oxp_menu_art_row(&menu_art,OXP_MENU_ART_FOOTER,
+                      OXP_MENU_X+2u,OXP_MENU_Y+338u,OXP_MENU_W-4u,29u,y,
+                      raster_row.pixels,OXP_SHELL_RASTER_W);
+                for(unsigned i=0;i<OXP_MENU_ITEMS;++i){
+                    unsigned xx=OXP_MENU_ROW_X+(i/7u)*OXP_MENU_COLUMN_W;
+                    unsigned yy=OXP_MENU_ROW_Y+(i%7u)*OXP_MENU_ROW_STEP;
+                    if(menu_cursor==i || menu_hover==(int)i)
+                        (void)oxp_menu_art_row(&menu_art,menu_cursor==i?
+                            OXP_MENU_ART_SELECTED:OXP_MENU_ART_HOVER,
+                            xx,yy,234u,37u,y,raster_row.pixels,OXP_SHELL_RASTER_W);
+                }
+                oxp_raster_over_row(shell_frame,drawn,layer,y,raster_row.pixels);
             }else oxp_raster_row(shell_frame,drawn,layer,y,raster_row.pixels);
+            if(layer==0u && menu_art_loaded && desktop_hover>=0){
+                unsigned yy=OXP_DESKTOP_TOP+(unsigned)desktop_hover*OXP_DESKTOP_STEP;
+                if(y>=yy+54u && y<yy+83u){
+                    (void)oxp_menu_art_row(&menu_art,OXP_MENU_ART_DESKTOP_LABEL,
+                          OXP_DESKTOP_X+3u,yy+54u,OXP_DESKTOP_SLOT_W-6u,29u,y,
+                          raster_row.pixels,OXP_SHELL_RASTER_W);
+                    oxp_raster_background_text_row(shell_frame,drawn,y,raster_row.pixels);
+                }
+            }
+            draw_shell_icon_rows(layer,y,raster_row.pixels);
             if((int64_t)oxp_call3(29,(uint64_t)&raster_row,sizeof(raster_row),0)!=0)
                 return -1;
         }
@@ -216,7 +410,6 @@ static int publish_pixel_layers(unsigned mask){
 
 /* Windowd now constructs native window pixels, not just their order.
  * Static data lives in the service's private writable ELF segment. */
-static oxp_shell_window_t shell_windows[17];
 static oxp_native_info_t native_infos[OXP_NATIVE_SLOTS];
 static oxp_native_info_t old_native_infos[OXP_NATIVE_SLOTS];
 static oxp_shell_window_t old_native_windows[OXP_NATIVE_SLOTS];
@@ -229,7 +422,7 @@ static int bytes_differ(const void *left,const void *right,size_t size){
     return 0;
 }
 static int publish_native_scene(void){
-    int changed=!native_scene_valid;
+    int changed=!native_scene_valid || skin_input_changed;
     oxp_shell_window_t views[OXP_NATIVE_SLOTS];
     for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         int64_t ret=(int64_t)oxp_call3(31,i,(uint64_t)&native_infos[i],sizeof(native_infos[i]));
@@ -240,7 +433,7 @@ static int publish_native_scene(void){
         if(native_infos[i].active && native_infos[i].painted &&
            (!native_scene_valid || old_native_infos[i].generation!=native_infos[i].generation ||
             !old_native_infos[i].painted)){
-            for(unsigned y=0;y<OXP_NATIVE_H;++y){
+            for(unsigned y=0;y<native_infos[i].surface_h && y<OXP_NATIVE_H;++y){
                 /* An app can exit while its pixels are being captured. This
                  * is a normal lifecycle race, not a reason to kill windowd. */
                 if((int64_t)oxp_call3(32,i,(uint64_t)&native_scanline,y)){
@@ -264,7 +457,9 @@ static int publish_native_scene(void){
     raster_row.layer=OXP_SHELL_LAYER_NATIVE;
     for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
         raster_row.y=y;
-        oxp_native_scene_row(views,native_infos,native_buffers,y,raster_row.pixels);
+        oxp_native_scene_row_skinned(views,native_infos,native_buffers,y,
+                                    raster_row.pixels,skin_loaded?&skin:0,
+                                    skin_mouse_x,skin_mouse_y,skin_pressed);
         if((int64_t)oxp_call3(29,(uint64_t)&raster_row,sizeof(raster_row),0))return -1;
     }
     if((int64_t)oxp_call(30,OXP_SHELL_MASK_NATIVE,0))return -1;
@@ -273,17 +468,26 @@ static int publish_native_scene(void){
         old_native_windows[i]=views[i];
     }
     native_scene_valid=1;
+    skin_input_changed=0;
     return 0;
 }
 
-static int menu_visible;
-static uint32_t menu_cursor;
 static int32_t drag_index;
 static int32_t resize_index;
 static int32_t resize_start_w,resize_start_h;
 static int32_t drag_anchor_x,drag_anchor_y,drag_start_x,drag_start_y;
 
 
+__attribute__((noinline)) static const char *desktop_name(unsigned i){
+    switch(i){
+    case 0:return "MY COMPUTER";
+    case 1:return "TERMINAL";
+    case 2:return "PAINT";
+    case 3:return "SETTINGS";
+    case 4:return "WORDPAD";
+    default:return "";
+    }
+}
 static const char *menu_name(unsigned i){
     switch(i){
     case 0:return "TERMINAL";
@@ -365,17 +569,47 @@ static int paint_shell(void){
             /* One stable palette per theme, with faint horizontal bands. */
             oxp_theme_wallpaper(shell_theme) + i*0x00020100u);
     }
-    add_background_rect(14,26,94,65,0x286db7);
-    add_background_text(24,48,"MY COMPUTER",1,0xffffff);
-    add_background_rect(14,116,94,65,0x286db7);
-    add_background_text(30,138,"DOCUMENTS",1,0xffffff);
-    add_background_rect(14,206,94,65,0x286db7);
-    add_background_text(30,228,"TERMINAL",1,0xffffff);
+    /* Desktop shortcut tiles now use the same icons as the applications.
+     * Hover creates a lightweight selection highlight, not a giant block. */
+    for(unsigned i=0;i<(desktop_icons_enabled?OXP_DESKTOP_COUNT:0u);++i){
+        unsigned yy=OXP_DESKTOP_TOP+i*OXP_DESKTOP_STEP;
+        if(!menu_art_loaded && desktop_hover==(int)i){
+            add_background_rect(OXP_DESKTOP_X,yy,OXP_DESKTOP_SLOT_W,
+                                OXP_DESKTOP_SLOT_H,0x396fb2);
+            add_background_rect(OXP_DESKTOP_X+1u,yy+1u,
+                                OXP_DESKTOP_SLOT_W-2u,OXP_DESKTOP_SLOT_H-2u,
+                                0x4a86c1);
+        }
+        /* Dark shadow improves legibility on custom wallpapers. */
+        /* Center text below the icon; 1px shadow works over bright wallpaper.
+         * Exact glyph advance is 6 logical pixels at this font size. */
+        const char *label=desktop_name(i);unsigned letters=0;
+        while(label[letters])++letters;
+        unsigned textw=oxp_raster_text_width(label,1u);
+        unsigned xx=OXP_DESKTOP_X+(textw<OXP_DESKTOP_SLOT_W?
+                             (OXP_DESKTOP_SLOT_W-textw)/2u:0u);
+        add_background_text(xx+1u,yy+65u,label,1,0x10243c);
+        add_background_text(xx,yy+64u,label,1,0xffffff);
+    }
     add_window_composition();
-    add_rect(0,SHELL_TASK_TOP,SHELL_W,42,oxp_theme_taskbar(shell_theme));
-    add_rect(0,SHELL_TASK_TOP,1024,3,0x78ace6);
-    add_rect(2,SHELL_TASK_TOP+4,105,35,oxp_theme_start(shell_theme));
-    add_text(19,SHELL_TASK_TOP+16,"START",2,0xffffff);
+    if(!skin_loaded){
+        add_rect(0,SHELL_TASK_TOP,SHELL_W,42,oxp_theme_taskbar(shell_theme));
+        add_rect(0,SHELL_TASK_TOP,1024,3,0x78ace6);
+        add_rect(2,SHELL_TASK_TOP+4,105,35,oxp_theme_start(shell_theme));
+    }
+    /* Short ramp provides a crisp hover response without a continuous
+     * animation loop or uploading unchanged desktop pixels. */
+    if(start_hover && start_glow<2u)++start_glow;
+    if(!start_hover && start_glow>0u)--start_glow;
+    if(start_glow){
+        add_rect(8u,SHELL_TASK_TOP+5u,90u,1u,
+                 start_glow==2u?0xe0faff:0x86c7e7);
+        add_rect(8u,SHELL_TASK_TOP+36u,90u,1u,0x134676);
+    }
+    if(shell_press_target==1){
+        add_rect(8u,SHELL_TASK_TOP+7u,90u,2u,0x174a80);
+    }
+    add_text(19,SHELL_TASK_TOP+16u,"START",2,0xffffff);
     unsigned count=0,slot=0;
     for(unsigned i=0;i<17u;++i)if(shell_windows[i].visible)++count;
     unsigned bw=count?(SHELL_W-216u)/count:1u;
@@ -385,26 +619,79 @@ static int paint_shell(void){
         if(!shell_windows[i].visible)continue;
         unsigned bx=115u+slot++*bw;
         unsigned wide=bw>3u?bw-3u:1u;
-        add_rect(bx,SHELL_TASK_TOP+6,wide,31,
-                 shell_windows[i].active?0x317ec6:0x2e65a3);
-        add_text(bx+5,SHELL_TASK_TOP+16,shell_windows[i].title,1,0xffffff);
-    }
-    add_rect(934,SHELL_TASK_TOP+5,85,32,0x246cbc);
-    char seconds[24]="T+";decimal(seconds+2,oxp_ticks()/100u);
-    add_text(944,SHELL_TASK_TOP+17,seconds,1,0xffffff);
-    if(menu_visible){
-        add_rect(2,SHELL_TASK_TOP-370u,500,370,0xeaf3ff);
-        add_rect(3,SHELL_TASK_TOP-367u,498,37,0x1a5fb9);
-        add_text(19,SHELL_TASK_TOP-357u,"OPENXP PROGRAMS",2,0xffffff);
-        for(unsigned i=0;i<14u;++i){
-            unsigned xx=12u+(i/7u)*245u,yy=SHELL_TASK_TOP-319u+(i%7u)*43u;
-            add_rect(xx,yy,230,40,menu_cursor==i?0xcfe7ff:0xf9fafd);
-            add_text(xx+15,yy+15,menu_name(i),1,0x1c3968);
+        add_rect(bx,SHELL_TASK_TOP+7u,wide,29u,
+                 shell_windows[i].active?oxp_theme_accent(shell_theme):
+                 task_hover==(int)i?oxp_theme_selection(shell_theme):
+                 oxp_theme_taskbar(shell_theme));
+        if(shell_press_target==(int)(100u+i) && wide>4u)
+            add_rect(bx+2u,SHELL_TASK_TOP+9u,wide-4u,2u,0x143f72);
+        if(wide>9u){
+            add_rect(bx+2u,SHELL_TASK_TOP+8u,wide-4u,1u,
+                shell_windows[i].active?0xb6def7:oxp_theme_accent(shell_theme));
         }
+        unsigned tx=bx+(icons_loaded&&bw>=31u?28u:6u);
+        unsigned characters=(bx+wide>tx+4u)?(bx+wide-tx-4u)/6u:0u;
+        if(characters>OXP_SHELL_TEXT_MAX-1u)characters=OXP_SHELL_TEXT_MAX-1u;
+        char label[OXP_SHELL_TEXT_MAX];unsigned j=0;
+        while(j<characters && shell_windows[i].title[j]){
+            label[j]=shell_windows[i].title[j];++j;
+        }
+        label[j]=0;
+        if(j)add_text(tx,SHELL_TASK_TOP+17u,label,1,0xffffff);
+    }
+    add_rect(934,SHELL_TASK_TOP+5u,85u,32u,0x246cbc);
+    add_rect(935,SHELL_TASK_TOP+6u,83u,1u,0x81c5f1);
+    char seconds[24]="T+";decimal(seconds+2,oxp_ticks()/100u);
+    add_text(944,SHELL_TASK_TOP+17u,seconds,1,0xffffff);
+    if(menu_visible){
+        if(!menu_art_loaded){
+            add_rect(OXP_MENU_X,OXP_MENU_Y,OXP_MENU_W,OXP_MENU_H,0x163e78);
+            add_rect(OXP_MENU_X+2u,OXP_MENU_Y+2u,OXP_MENU_W-4u,OXP_MENU_H-4u,
+                     oxp_theme_panel(shell_theme));
+            add_rect(OXP_MENU_X+2u,OXP_MENU_Y+2u,OXP_MENU_W-4u,47u,oxp_theme_accent(shell_theme));
+            add_rect(OXP_MENU_X+2u,OXP_MENU_Y+2u,OXP_MENU_W-4u,2u,0x8fcaff);
+        }
+        add_rect(OXP_MENU_X+7u,OXP_MENU_Y+9u,35u,33u,oxp_theme_accent(shell_theme));
+        add_text(OXP_MENU_X+51u,OXP_MENU_Y+14u,"OPENXP",2,0xffffff);
+        add_text(OXP_MENU_X+51u,OXP_MENU_Y+33u,"AURORA DESKTOP",1,0xe6f5ff);
+        add_rect(255u,OXP_MENU_ROW_Y,1u,278u,
+                 shell_theme==OXP_THEME_MIDNIGHT?0x627092:0xb4c6db);
+        for(unsigned i=0;i<OXP_MENU_ITEMS;++i){
+            unsigned xx=OXP_MENU_ROW_X+(i/7u)*OXP_MENU_COLUMN_W;
+            unsigned yy=OXP_MENU_ROW_Y+(i%7u)*OXP_MENU_ROW_STEP;
+            int selected=(menu_cursor==i);
+            if(!menu_art_loaded){
+                if(selected){
+                    add_rect(xx,yy,234u,37u,0x87b5e9);
+                    add_rect(xx+1u,yy+1u,232u,35u,oxp_theme_selection(shell_theme));
+                }else if(menu_hover==(int)i){
+                    add_rect(xx,yy,234u,37u,0xd7eafb);
+                }
+            }
+            add_text(xx+46u,yy+14u,menu_name(i),1,
+                     shell_theme==OXP_THEME_MIDNIGHT?0xecf2ff:0x193755);
+        }
+        if(!menu_art_loaded){
+            add_rect(OXP_MENU_X+2u,OXP_MENU_Y+338u,OXP_MENU_W-4u,29u,0xd5e5f7);
+            add_rect(OXP_MENU_X+2u,OXP_MENU_Y+338u,OXP_MENU_W-4u,1u,0x8cb9e4);
+        }
+        add_text(OXP_MENU_X+17u,OXP_MENU_Y+351u,"OPENXP  -  EXPLORE MORE",1,
+                 shell_theme==OXP_THEME_MIDNIGHT?0xe0eafa:0x315b88);
     }
     if(frame_overflow)return -1; /* Do not submit a partial composition. */
-    unsigned layers=(layer_changed(0)?OXP_SHELL_MASK_BACKGROUND:0u) |
-                    (layer_changed(1)?OXP_SHELL_MASK_OVERLAY:0u);
+    unsigned layers=((background_visual_dirty||layer_changed(0))?
+                     OXP_SHELL_MASK_BACKGROUND:0u) |
+                    ((overlay_visual_dirty||layer_changed(1))?
+                     OXP_SHELL_MASK_OVERLAY:0u);
+    /* Motion inside a single hot zone frequently leaves every draw command
+     * unchanged. In that case no compositor syscall or raster upload is
+     * needed. Metadata-only window-order changes still get published. */
+    int command_changed=!previous_valid || drawn!=previous_count;
+    if(!command_changed)for(unsigned i=0;i<drawn;++i){
+        if(bytes_differ(&shell_frame[i],&previous_frame[i],
+                        sizeof(shell_frame[i]))){command_changed=1;break;}
+    }
+    if(!command_changed && !layers)return 0;
     /* Publish metadata first; if raster upload fails, the validated old
      * command renderer remains an immediately usable fallback. */
     if((int64_t)oxp_call(22,(uint64_t)shell_frame,drawn)!=0)return -1;
@@ -412,11 +699,14 @@ static int paint_shell(void){
     for(unsigned i=0;i<drawn;++i)previous_frame[i]=shell_frame[i];
     previous_count=drawn;previous_valid=1;
     last_wallpaper_generation=wallpaper_generation;
+    background_visual_dirty=0;overlay_visual_dirty=0;
     return 0;
 }
 static void shell_menu(int on){
     menu_visible=on?1:0;
-    if(menu_visible)menu_cursor=0;
+    if(menu_visible){menu_cursor=0;menu_hover=-1;}
+    else menu_hover=-1;
+    overlay_visual_dirty=1;
     (void)oxp_call(23,OXP_SHELL_MENU,(uint64_t)menu_visible);
 }
 static void activate(unsigned index){
@@ -455,6 +745,7 @@ static void handle_key(const oxp_shell_event_t *e){
         shell_menu(!menu_visible);return;
     }
     if((mods&KEYMOD_ALT) && e->code==KEY_TAB){
+        refresh_windows();
         /* Focus policy now lives in the unprivileged shell. */
         unsigned top=17u;
         for(unsigned i=0;i<17u;++i)if(shell_windows[i].active)top=i;
@@ -504,17 +795,193 @@ static void handle_key(const oxp_shell_event_t *e){
         }
     }
     if(menu_visible){
+        unsigned earlier=menu_cursor;
         if(e->code==KEY_ESCAPE){shell_menu(0);return;}
+        if(e->code==KEY_HOME)menu_cursor=0u;
+        if(e->code==KEY_END)menu_cursor=13u;
+        if(e->code==KEY_TAB){
+            if(mods&KEYMOD_SHIFT)
+                menu_cursor=(menu_cursor+OXP_MENU_ITEMS-1u)%OXP_MENU_ITEMS;
+            else menu_cursor=(menu_cursor+1u)%OXP_MENU_ITEMS;
+        }
         if(e->code==KEY_UP && menu_cursor>0)--menu_cursor;
         if(e->code==KEY_DOWN && menu_cursor<13u)++menu_cursor;
         if(e->code==KEY_LEFT && menu_cursor>=7u)menu_cursor-=7u;
         if(e->code==KEY_RIGHT && menu_cursor<7u)menu_cursor+=7u;
+        if(earlier!=menu_cursor){
+            /* Keyboard selection wins until the pointer enters another row. */
+            menu_hover=-1;
+            overlay_visual_dirty=1;
+        }
         if(e->code==KEY_ENTER)activate(menu_cursor);
     }
 }
+static int skin_hover_index(int32_t x,int32_t y){
+    int best=-1;uint32_t best_z=0;
+    /* An overlapped native caption must not glow through a legacy window. */
+    for(unsigned i=0;i<17u;++i){
+        const oxp_shell_window_t *w=&shell_windows[i];
+        if(w->visible && !w->minimized && x>=(int32_t)w->x &&
+           y>=(int32_t)w->y && x<(int32_t)(w->x+w->width) &&
+           y<(int32_t)(w->y+w->height) && w->z>=best_z){
+            best_z=w->z;
+            best=(int)i;
+        }
+    }
+    if(best<14)return -1;
+    best=-1;best_z=0;
+    for(unsigned i=14;i<17u;++i){
+        const oxp_shell_window_t *w=&shell_windows[i];
+        if(!w->visible || w->minimized || w->width<=60u)continue;
+        unsigned buttons=w->width>88u?3u:1u;
+        for(unsigned b=0;b<buttons;++b){
+            unsigned pos=buttons==3u?(80u-26u*b):28u;
+            int32_t bx=(int32_t)(w->x+w->width-pos);
+            int32_t by=(int32_t)(w->y+6u);
+            if(x>=bx && x<bx+21 && y>=by && y<by+21 &&
+               (best<0 || w->z>=best_z)){
+                best=(int)(i*3u+b);best_z=w->z;
+            }
+        }
+    }
+    return best;
+}
+/* Stable targets are used for hover and release activation alike.
+ * Encoding: Start=1, task=100+slot, desktop=200+slot, menu=300+slot,
+ * outside-menu dismissal=400. No application canvas is a shell target. */
+static int task_target(unsigned x){
+    unsigned count=0,slot=0;
+    for(unsigned i=0;i<17u;++i)if(shell_windows[i].visible)++count;
+    unsigned bw=count?(SHELL_W-216u)/count:1u;
+    if(bw>142u)bw=142u;
+    if(!bw)bw=1u;
+    for(unsigned i=0;i<17u;++i){
+        if(!shell_windows[i].visible)continue;
+        unsigned bx=115u+slot++*bw;
+        if(x>=bx && x<bx+(bw>3u?bw-3u:1u))return (int)(100u+i);
+    }
+    return -1;
+}
+static int shell_target_at(int32_t x,int32_t y){
+    if(x<0 || y<0 || x>=(int32_t)SHELL_W || y>=(int32_t)SHELL_H)
+        return -1;
+    if(y>=(int32_t)SHELL_TASK_TOP){
+        if(x<110)return 1;
+        return task_target((unsigned)x);
+    }
+    if(menu_visible){
+        int hit=oxp_menu_hit((unsigned)x,(unsigned)y);
+        return hit>=0?300+hit:400;
+    }
+    if(!desktop_icons_enabled)return -1;
+    int hit=oxp_desktop_hit((unsigned)x,(unsigned)y);
+    if(hit<0)return -1;
+    for(unsigned i=0;i<17u;++i){
+        const oxp_shell_window_t *w=&shell_windows[i];
+        if(w->visible && !w->minimized && x>=(int32_t)w->x &&
+           y>=(int32_t)w->y && x<(int32_t)(w->x+w->width) &&
+           y<(int32_t)(w->y+w->height))return -1;
+    }
+    return 200+hit;
+}
+static void shell_activate_target(int target){
+    if(target==1){shell_menu(!menu_visible);return;}
+    if(target>=100 && target<117){
+        (void)oxp_call(23,OXP_SHELL_TASK,(unsigned)(target-100));
+        shell_menu(0);return;
+    }
+    if(target>=200 && target<200+(int)OXP_DESKTOP_COUNT){
+        activate(oxp_desktop_app((unsigned)(target-200)));return;
+    }
+    if(target>=300 && target<300+(int)OXP_MENU_ITEMS){
+        activate((unsigned)(target-300));return;
+    }
+    if(target==400)shell_menu(0);
+}
 static void handle_pointer(const oxp_shell_event_t *e){
     int32_t x=(int32_t)e->x,y=(int32_t)e->y;
-    if(e->flags==OXP_SHELL_POINTER_UP){drag_index=-1;resize_index=-1;return;}
+    if(drag_document_active){
+        if(oxp_ticks()-drag_document_tick>300u)drag_document_active=0;
+        else if(e->flags==OXP_SHELL_POINTER_UP){
+            unsigned dx=x>drag_document_x?(unsigned)(x-drag_document_x):
+                (unsigned)(drag_document_x-x);
+            unsigned dy=y>drag_document_y?(unsigned)(y-drag_document_y):
+                (unsigned)(drag_document_y-y);
+            if(dx>5u || dy>5u){
+                int target=-1;uint32_t top=0;
+                for(unsigned i=0;i<17u;++i){
+                    const oxp_shell_window_t *w=&shell_windows[i];
+                    if(!w->visible || w->minimized || x<(int32_t)w->x ||
+                       y<(int32_t)w->y || x>=(int32_t)(w->x+w->width) ||
+                       y>=(int32_t)(w->y+w->height))continue;
+                    if(target<0 || w->z>=top){target=(int)i;top=w->z;}
+                }
+                if(target>=0){
+                    const char *program=oxp_drop_editor(dragged_document,
+                                                        shell_windows[target].title);
+                    if(program){
+                        /* Fresh process-scoped launch; never mutate or inject
+                         * content into an existing editor document. */
+                        (void)oxp_launch_document(program,dragged_document);
+                    }
+                }
+            }
+            drag_document_active=0;
+        }
+    }
+    int hot=skin_hover_index(x,y);
+    /* Move must retain the original held state; previously any MOVE cleared
+     * skin_pressed even while the left mouse button remained down. */
+    int held=skin_pressed;
+    if(e->flags==OXP_SHELL_POINTER_DOWN)held=1;
+    else if(e->flags==OXP_SHELL_POINTER_UP)held=0;
+    if(hot!=skin_last_hover || (hot>=0 && held!=skin_pressed))
+        skin_input_changed=1;
+    skin_last_hover=hot;
+    skin_mouse_x=x;skin_mouse_y=y;skin_pressed=held;
+    int target=shell_target_at(x,y);
+    int next_desktop=target>=200 && target<200+(int)OXP_DESKTOP_COUNT?
+                     target-200:-1;
+    if(next_desktop!=desktop_hover){
+        desktop_hover=next_desktop;background_visual_dirty=1;
+    }
+    int next_menu=target>=300 && target<300+(int)OXP_MENU_ITEMS?
+                  target-300:-1;
+    if(next_menu!=menu_hover){
+        menu_hover=next_menu;overlay_visual_dirty=1;
+        if(menu_hover>=0)menu_cursor=(unsigned)menu_hover;
+    }
+    int next_start=target==1;
+    int next_task=target>=100 && target<117?target-100:-1;
+    if(next_start!=start_hover || next_task!=task_hover){
+        start_hover=next_start;task_hover=next_task;overlay_visual_dirty=1;
+    }
+    if(e->flags==OXP_SHELL_POINTER_UP){
+        int pressed=shell_press_target;
+        if(pressed!=-1){
+            int activated=oxp_shell_finish_press(&shell_press_target,target);
+            overlay_visual_dirty=1;
+            if(activated>=0)shell_activate_target(activated);
+        }
+        drag_index=-1;resize_index=-1;
+        return;
+    }
+    /* Shell controls activate on release, not down. This also makes the
+     * menu selectable by dragging the cursor across rows while held. */
+    if(e->flags==OXP_SHELL_POINTER_DOWN){
+        if(target!=-1){
+            shell_press_target=target;overlay_visual_dirty=1;
+            drag_index=-1;resize_index=-1;
+            return;
+        }
+        shell_press_target=-1;
+    }
+    /* Start menu is always above application windows. */
+    if(menu_visible && x>=(int32_t)OXP_MENU_X &&
+       x<(int32_t)(OXP_MENU_X+OXP_MENU_W) &&
+       y>=(int32_t)OXP_MENU_Y && y<(int32_t)(OXP_MENU_Y+OXP_MENU_H)){
+        drag_index=-1;resize_index=-1;return;
+    }
     if(e->flags==OXP_SHELL_POINTER_DOWN){
         refresh_windows();drag_index=-1;resize_index=-1;
         uint32_t best_z=0;
@@ -581,23 +1048,19 @@ static void handle_click(const oxp_shell_event_t *e){
         if(x<110u){shell_menu(!menu_visible);return;}
         taskbar_click(x);shell_menu(0);return;
     }
-    if(!menu_visible && x<110u && y<275u){
-        if(y>=25u && y<92u){activate(1);return;}
-        if(y>=115u && y<182u){activate(1);return;}
-        if(y>=205u && y<272u){activate(0);return;}
+    if(menu_visible){
+        int index=oxp_menu_hit(x,y);
+        if(index>=0){activate((unsigned)index);return;}
+        shell_menu(0);return;
     }
-    if(menu_visible && y>=SHELL_TASK_TOP-370u){
-        if(x>=12u&&x<502u){
-            unsigned col=(x-12u)/245u;
-            unsigned localx=(x-12u)%245u;
-            if(col<2u && localx<230u && y>=SHELL_TASK_TOP-319u){
-                unsigned row=(y-(SHELL_TASK_TOP-319u))/43u;
-                if(row<7u && (y-(SHELL_TASK_TOP-319u))%43u<40u){
-                    activate(col*7u+row);return;
-                }
-            }
+    int desktop=desktop_icons_enabled?oxp_desktop_hit(x,y):-1;
+    if(desktop>=0){
+        for(unsigned i=0;i<17u;++i){
+            const oxp_shell_window_t *w=&shell_windows[i];
+            if(w->visible && !w->minimized && x>=w->x && y>=w->y &&
+               x<w->x+w->width && y<w->y+w->height)return;
         }
-        shell_menu(0);
+        activate(oxp_desktop_app((unsigned)desktop));
     }
 }
 void oxp_main(void){
@@ -606,6 +1069,15 @@ void oxp_main(void){
      * in zero-filled RW memory rather than storing mutable data in RX pages. */
     drag_index=-1;
     resize_index=-1;
+    skin_mouse_x=-1;skin_mouse_y=-1;skin_last_hover=-1;
+    desktop_hover=-1;menu_hover=-1;task_hover=-1;
+    shell_press_target=-1;start_hover=0;start_glow=0;
+    desktop_icons_enabled=1u;drag_document_active=0;
+    app_file_request_t deskpref={0};
+    oxp_copy(deskpref.path,"home/desktop.cfg",sizeof deskpref.path);
+    if(oxp_file(APP_FS_READ,&deskpref)==0 && deskpref.size==1u &&
+       deskpref.data[0]<=1u)desktop_icons_enabled=deskpref.data[0];
+    /* Preferences are restored before loading the selected artwork. */
     wm_state_init(&state);
     if(oxp_listen()!=0)oxp_exit(1);
     /* windowd has no application window: it leaves all native slots for
@@ -622,6 +1094,15 @@ void oxp_main(void){
     oxp_copy(wallpref.path,"home/wallpaper.cfg",sizeof wallpref.path);
     if(oxp_file(APP_FS_READ,&wallpref)==0 && wallpref.size==1 &&
        wallpref.data[0]<32u)(void)apply_wallpaper(wallpref.data[0]);
+    if(!load_aurora_skin(shell_theme) || !load_shell_icons(shell_theme)){
+        /* An absent custom pack never prevents recovery desktop startup. */
+        if(shell_theme!=OXP_THEME_BLUE){
+            (void)load_aurora_skin(OXP_THEME_BLUE);
+            (void)load_shell_icons(OXP_THEME_BLUE);
+        }
+    }
+    (void)load_menu_art(shell_theme);
+    load_shell_font();
     refresh_windows();
     if(paint_shell() || publish_native_scene())oxp_exit(2);
     uint64_t refresh=oxp_ticks();

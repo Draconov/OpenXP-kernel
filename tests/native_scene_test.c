@@ -44,7 +44,7 @@ int main(void){
     oxp_native_viewport_t full=oxp_native_viewport(0,0,1024,726);
     oxp_native_canvas_t logical=oxp_native_canvas(1024,726);
     assert(full.x==16u && full.y==43u && full.w==1002u && full.h==677u);
-    assert(logical.w<320u && logical.h==180u);
+    assert(logical.w>320u && logical.h==OXP_NATIVE_H);
     assert((uint64_t)logical.w*full.h <= (uint64_t)logical.h*full.w);
     for(unsigned y=0;y<OXP_NATIVE_H;++y)
         for(unsigned x=0;x<OXP_NATIVE_W;++x)
@@ -59,7 +59,7 @@ int main(void){
     uint32_t cx=0,cy=0;
     oxp_native_pointer_to_canvas(full.x+full.w-1u,full.y+full.h-1u,
                                  1024,726,&cx,&cy);
-    assert(cx>=16u && cx<16u+logical.w && cy>=43u && cy<=222u);
+    assert(cx>=16u && cx<16u+logical.w && cy>=43u && cy<43u+logical.h);
     oxp_native_pointer_to_canvas(full.x,full.y,1024,726,&cx,&cy);
     assert(cx==16u && cy==43u);
     oxp_native_pointer_to_canvas(14u,44u,1024,726,&cx,&cy);
@@ -69,7 +69,7 @@ int main(void){
     oxp_native_canvas_t slim=oxp_native_canvas(280,200);
     assert(slim.w<320u && slim.h==180u);
     oxp_native_canvas_t wide=oxp_native_canvas(640,190);
-    assert(wide.w==320u && wide.h<180u);
+    assert(wide.w==OXP_NATIVE_W && wide.h<180u);
     oxp_native_pointer_to_canvas(0,0,20,20,&cx,&cy);
     assert(cx==1023u && cy==1023u);
     puts("PASS: Ring 3 native-window chrome, proportional scaling, viewport input and clipping");

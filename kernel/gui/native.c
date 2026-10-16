@@ -92,7 +92,8 @@ bool native_open(uint64_t pid,const char *title,size_t n){
     wake_thread(w->waiter);
     *w=(native_window_t){0};w->active=true;w->owner=pid;w->dirty=true;
     w->content_generation=content_version();
-    w->canvas_w=NATIVE_SURFACE_W;w->canvas_h=NATIVE_SURFACE_H;
+    w->canvas_w=320u;w->canvas_h=180u;
+    w->surface_w=320u;w->surface_h=180u;
     for(size_t i=0;i<n;++i)w->title[i]=title[i];
     /* A recycled PID slot must never expose the previous owner's pixels,
      * even if the new owner only paints a small rectangle. */
@@ -124,6 +125,18 @@ static uint32_t dequeue(native_window_t *w) {
     uint32_t event = w->events[w->tail];
     w->tail = (w->tail + 1u) % NATIVE_EVENT_CAP;
     return event;
+}
+bool native_pointer_enable(uint64_t pid){
+    uint64_t flags=lock_irq();
+    int slot=find_owner(pid);
+    if(slot>=0)windows[slot].pointer_events=true;
+    unlock_irq(flags);return slot>=0;
+}
+bool native_pointer_enabled_slot(unsigned slot){
+    if(slot>=NATIVE_MAX_WINDOWS)return false;
+    uint64_t flags=lock_irq();
+    bool value=windows[slot].active && windows[slot].pointer_events && !windows[slot].closing;
+    unlock_irq(flags);return value;
 }
 uint32_t native_next_event(uint64_t pid){
     uint64_t flags=lock_irq();
@@ -167,9 +180,34 @@ int native_slot_for_owner(uint64_t pid){
     uint64_t flags=lock_irq();int slot=find_owner(pid);unlock_irq(flags);return slot;
 }
 static void enqueue(native_window_t *w,uint32_t e){
+    /* Motion is replaceable, never let a queue full of mouse movement
+     * discard a release, close, keyboard input or resize notification. */
+    if((e & NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE &&
+       w->head!=w->tail){
+        unsigned last=(w->head+NATIVE_EVENT_CAP-1u)%NATIVE_EVENT_CAP;
+        if((w->events[last]&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE){
+            w->events[last]=e;return;
+        }
+    }
     unsigned next=(w->head+1)%NATIVE_EVENT_CAP;
-    if(next==w->tail)w->tail=(w->tail+1)%NATIVE_EVENT_CAP;
-    w->events[w->head]=e;w->head=next;
+    if(next==w->tail){
+        if((e&NATIVE_EVENT_POINTER_MASK)==NATIVE_EVENT_POINTER_MOVE)return;
+        /* Drop an older movement when possible, keeping control ordering.
+         * The queue is tiny; bounded shifting is preferable to lost UP. */
+        unsigned at=w->tail;
+        while(at!=w->head &&
+              (w->events[at]&NATIVE_EVENT_POINTER_MASK)!=NATIVE_EVENT_POINTER_MOVE)
+            at=(at+1u)%NATIVE_EVENT_CAP;
+        if(at==w->head)w->tail=(w->tail+1u)%NATIVE_EVENT_CAP;
+        else{
+            while(at!=w->tail){
+                unsigned prev=(at+NATIVE_EVENT_CAP-1u)%NATIVE_EVENT_CAP;
+                w->events[at]=w->events[prev];at=prev;
+            }
+            w->tail=(w->tail+1u)%NATIVE_EVENT_CAP;
+        }
+    }
+    w->events[w->head]=e;w->head=(w->head+1u)%NATIVE_EVENT_CAP;
 }
 void native_push_event_slot(unsigned slot,uint32_t event){
     if(slot>=NATIVE_MAX_WINDOWS||!event)return;
@@ -299,9 +337,46 @@ bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count) {
             for (uint32_t col=x;col<x+w;++col)
                 pixels[slot][row*NATIVE_SURFACE_W+col]=color;
     }
-    painted[slot]=true;windows[slot].dirty=true;dirty_any=true;
+    painted[slot]=true;
+    windows[slot].surface_w=windows[slot].canvas_w;
+    windows[slot].surface_h=windows[slot].canvas_h;
+    windows[slot].dirty=true;dirty_any=true;
     windows[slot].content_generation=content_version();
     unlock_irq(flags);return true;
+}
+/* Atomic per tile, clipped to the bounded application backing surface.
+ * 0x0001 is the compositor's transparency key and must not leak from a
+ * normally opaque native application pixel. Alpha 0 keeps the old pixel. */
+bool native_bitmap(uint64_t pid,const native_bitmap_req_t *req){
+    if(!pid||!req||!req->w||!req->h||
+       req->w>NATIVE_BITMAP_TILE||req->h>NATIVE_BITMAP_TILE||
+       req->x>=NATIVE_SURFACE_W||req->y>=NATIVE_SURFACE_H||
+       req->w>NATIVE_SURFACE_W-req->x||req->h>NATIVE_SURFACE_H-req->y)return false;
+    uint64_t flags=lock_irq();
+    int slot=find_owner(pid);
+    if(slot<0){unlock_irq(flags);return false;}
+    for(unsigned y=0;y<req->h;++y)for(unsigned x=0;x<req->w;++x){
+        unsigned off=3u*(y*req->w+x);
+        unsigned a=req->pixels[off+2u];
+        if(!a)continue;
+        uint16_t fore=(uint16_t)(req->pixels[off]|(uint16_t)req->pixels[off+1u]<<8);
+        uint16_t *out=&pixels[slot][(y+req->y)*NATIVE_SURFACE_W+x+req->x];
+        if(a==255u){*out=fore==0x0001u?0u:fore;continue;}
+        uint16_t back=*out;
+        unsigned inv=255u-a;
+        unsigned r=(((back>>11)&31u)*inv+((fore>>11)&31u)*a+127u)/255u;
+        unsigned g=(((back>>5)&63u)*inv+((fore>>5)&63u)*a+127u)/255u;
+        unsigned b=((back&31u)*inv+(fore&31u)*a+127u)/255u;
+        uint16_t mixed=(uint16_t)((r<<11)|(g<<5)|b);
+        *out=mixed==0x0001u?0u:mixed;
+    }
+    painted[slot]=true;
+    windows[slot].surface_w=windows[slot].canvas_w;
+    windows[slot].surface_h=windows[slot].canvas_h;
+    windows[slot].dirty=true;dirty_any=true;
+    windows[slot].content_generation=content_version();
+    unlock_irq(flags);
+    return true;
 }
 bool native_has_surface(unsigned slot) {
     if(slot>=NATIVE_MAX_WINDOWS)return false;

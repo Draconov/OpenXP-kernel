@@ -2,7 +2,7 @@
 
 OpenXP presents an **XP-inspired virtual C: drive**. It is not FAT, NTFS, or a
 Windows installation. Folder names are backed by VFS directory metadata, the
-bundled read-only OXRD boot archive, and a tiny writable RAM store. Some system
+bundled read-only OXRD boot archive, and a bounded writable RAM store. Some system
 folders are empty placeholders for future drivers and resources.
 
 ## Directory structure
@@ -39,7 +39,7 @@ catalog is defined in `kernel/fs/app_catalog.h`.
 The native File Manager opens folders with **Enter** or a second click on an
 already selected folder; **Backspace** navigates upward. Select an `.exe`
 entry and press **Enter** to launch it. Copy, delete and rename remain limited
-to the temporary writable HOME area, and copying an application to HOME does
+to the writable HOME area, and copying an application to HOME does
 not make it executable.
 
 The native Terminal supports `CD`, `DIR`, `PWD`, `CAT` and `RUN`. For instance:
@@ -85,13 +85,17 @@ wallpaper. It will appear in the system folder after rebuilding the ISO.
 ## Persistence and permissions
 
 - `Home` and `My Documents` share the same temporary RAM storage. RAM files
-  disappear when OpenXP reboots.
+  disappear when OpenXP reboots unless experimental persistence is enabled.
 - `Windows`, `System Apps`, `Program Files`, and the bundled wallpaper files are
   read-only in the default ISO.
 - Empty placeholder directories aren't backed by a real disk and cannot yet
   contain newly installed applications.
-- No FAT/NTFS driver, program installer, dynamic library loader, or general
-  directory-creation API is provided.
+- User-created nested folders, folder rename/move, file copy and empty-folder removal
+  are supported under HOME and its Documents aliases. Recursive deletion and
+  directory-tree copying are not supported.
+- Up to 48 RAMFS records (including directory markers) can each store up to
+  16 KiB. Full-capacity snapshots require an explicitly created OXPDISK2 disk.
+- No FAT/NTFS driver, program installer or dynamic library loader is provided.
 - Experimental IDE snapshot storage is documented in [Storage](STORAGE.md).
 
 See [Roadmap](ROADMAP.md) for future work: wallpaper selection, writable disk

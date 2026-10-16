@@ -1,3 +1,4 @@
+#include "native_keymap.h"
 #include "gui/desktop.h"
 #include "fs/initrd.h"
 #include "fs/ramfs.h"
@@ -255,6 +256,7 @@ const char *desktop_shell_title(desktop_t *d,uint32_t index){
 }
 void desktop_init(desktop_t *d,fb_surface_t *s,shell_services_t services) {
     *d=(desktop_t){0};d->surface=s;
+    d->native_pointer_capture=-1;d->native_pointer_hover=-1;
     d->windows[0]=(desktop_window_t){70,90,s->width>810?670:s->width-110,s->height>610?370:s->height-185,true,false,false,0,0,0,0};
     d->windows[1]=(desktop_window_t){110,100,s->width>810?540:s->width-130,s->height>610?330:s->height-185,false,false,false,0,0,0,0};
     d->windows[2]=(desktop_window_t){160,105,s->width>810?440:s->width-180,s->height>450?235:s->height-170,true,false,false,0,0,0,0};
@@ -1321,6 +1323,9 @@ static void draw_window(desktop_t *d,int index,bool active) {
             if(v.w){
                 for(unsigned dy=0;dy<v.h;++dy){
                     oxp_native_canvas_t canvas=oxp_native_canvas((unsigned)w->w,(unsigned)w->h);
+                    if(native.surface_w && native.surface_h){
+                        canvas.w=native.surface_w;canvas.h=native.surface_h;
+                    }
                     unsigned sy=(unsigned)((uint64_t)dy*canvas.h/v.h);
                     if(!native_copy_surface_row(slot,sy,source,NATIVE_SURFACE_W))break;
                     unsigned count=v.w>OXP_SHELL_RASTER_W?OXP_SHELL_RASTER_W:v.w;
@@ -1681,7 +1686,14 @@ static void desktop_click(desktop_t *d,int x,int y) {
             unsigned ylocal=(unsigned)(y-w->y);
             oxp_native_pointer_to_canvas(xlocal,ylocal,(unsigned)w->w,
                                          (unsigned)w->h,&xlocal,&ylocal);
-            native_push_event_slot((unsigned)(i-DESKTOP_NATIVE),
+            unsigned slot=(unsigned)(i-DESKTOP_NATIVE);
+            if(native_pointer_enabled_slot(slot)){
+                native_window_t owner=native_snapshot_slot(slot);
+                d->native_pointer_capture=(int)slot;
+                d->native_capture_owner=owner.owner;
+                native_push_event_slot(slot,
+                    NATIVE_EVENT_POINTER_DOWN | ((xlocal&1023u)<<10) | (ylocal&1023u));
+            }else native_push_event_slot(slot,
                 NATIVE_EVENT_CLICK | ((xlocal&1023u)<<10) | (ylocal&1023u));
             return;
         }
@@ -1788,6 +1800,70 @@ static void desktop_click(desktop_t *d,int x,int y) {
     else if(inside(x,y,12,115,104,65))open_window(d,DESKTOP_FILES);
     else if(inside(x,y,12,205,104,65))open_window(d,DESKTOP_TERMINAL);
 }
+/* Ordered hit-test avoids sending hover through obscuring windows. A
+ * header click belongs to windowd; only the native client is eligible. */
+static int native_pointer_target(desktop_t *d,int x,int y){
+    uint32_t order[DESKTOP_WINDOWS];uint32_t count=0;
+    bool service_order=false;
+#ifndef OPENXP_WM_HOST_TEST
+    service_order=shell_bridge_window_order(order,DESKTOP_WINDOWS,&count);
+#endif
+    int n=service_order?(int)count:DESKTOP_WINDOWS;
+    for(int z=n-1;z>=0;--z){
+        int index=service_order?(int)order[z]:d->order[z];
+        if(index<0||index>=DESKTOP_WINDOWS)continue;
+        desktop_window_t *w=&d->windows[index];
+        if(!w->open||w->minimized||!inside(x,y,w->x,w->y,w->w,w->h))continue;
+        if(index<DESKTOP_NATIVE)return -1;
+        unsigned slot=(unsigned)(index-DESKTOP_NATIVE);
+        if(!native_pointer_enabled_slot(slot) || x<w->x+16 || y<w->y+43)return -1;
+        return (int)slot;
+    }
+    return -1;
+}
+/* Coordinates outside the owner are encoded as 1023/1023, intentionally
+ * outside the maximum 640x360 canvas. A pointer release there cancels. */
+static void native_pointer_send(desktop_t *d,unsigned slot,uint32_t kind,int x,int y){
+    if(slot>=NATIVE_MAX_WINDOWS)return;
+    native_window_t owner=native_snapshot_slot(slot);
+    desktop_window_t *w=&d->windows[DESKTOP_NATIVE+(int)slot];
+    if(!owner.active||!owner.pointer_events||!w->open||w->minimized)return;
+    unsigned px=1023u,py=1023u;
+    if(inside(x,y,w->x+16,w->y+43,w->w-16,w->h-43)){
+        px=(unsigned)(x-w->x);py=(unsigned)(y-w->y);
+        oxp_native_pointer_to_canvas(px,py,(unsigned)w->w,(unsigned)w->h,&px,&py);
+        if(px>1022u)px=1022u;
+        if(py>1022u)py=1022u;
+    }
+    native_push_event_slot(slot,kind|(px<<10)|py);
+}
+static void native_pointer_route(desktop_t *d,int x,int y,bool down){
+    int target=native_pointer_target(d,x,y);
+    int prev=d->native_pointer_hover;
+    if(prev>=0){
+        native_window_t w=native_snapshot_slot((unsigned)prev);
+        if(!w.active||w.owner!=d->native_hover_owner||!w.pointer_events)prev=-1;
+    }
+    if(prev>=0 && target!=prev)
+        native_push_event_slot((unsigned)prev,NATIVE_EVENT_POINTER_LEAVE);
+    d->native_pointer_hover=target;
+    d->native_hover_owner=target<0?0:native_snapshot_slot((unsigned)target).owner;
+    int captured=d->native_pointer_capture;
+    if(captured>=0){
+        native_window_t owner=native_snapshot_slot((unsigned)captured);
+        if(!owner.active||owner.owner!=d->native_capture_owner||!owner.pointer_events)
+            captured=-1;
+    }
+    if(captured>=0){
+        if(!down){
+            native_pointer_send(d,(unsigned)captured,NATIVE_EVENT_POINTER_UP,x,y);
+            d->native_pointer_capture=-1;d->native_capture_owner=0;
+        }else native_pointer_send(d,(unsigned)captured,NATIVE_EVENT_POINTER_MOVE,x,y);
+    }else{
+        d->native_pointer_capture=-1;d->native_capture_owner=0;
+        if(target>=0)native_pointer_send(d,(unsigned)target,NATIVE_EVENT_POINTER_MOVE,x,y);
+    }
+}
 void desktop_mouse(desktop_t *d,int x,int y,bool down) {
     if(!d||!d->surface)return;
     if(x<0)x=0;
@@ -1820,6 +1896,7 @@ void desktop_mouse(desktop_t *d,int x,int y,bool down) {
         if(ny+w->h>d->surface->height-42)ny=d->surface->height-42-w->h;
         w->x=nx;w->y=ny;d->last_x=x;d->last_y=y;
     }
+    native_pointer_route(d,x,y,down);
     if(!down){d->dragging=false;d->resizing=false;d->paint_active=false;}
     d->mouse_down=down;
     d->mouse_x=x;d->mouse_y=y;
@@ -1970,9 +2047,12 @@ void desktop_key_event(desktop_t *d,const input_event_t *event) {
         if(mods&KEYMOD_CTRL) {
             if(lc=='s')native_push_event_slot(slot,NATIVE_EVENT_SAVE);
             else if(lc=='o')native_push_event_slot(slot,NATIVE_EVENT_OPEN);
-            return;
+            if(lc=='s'||lc=='o')return;
         }
-        if(event->code==KEY_UP)native_push_event_slot(slot,NATIVE_EVENT_UP);
+        uint32_t edit_key=native_editor_keymap(event);
+        if(edit_key){native_push_event_slot(slot,edit_key);return;}
+        if(event->code==KEY_TAB)native_push_event_slot(slot,(mods&KEYMOD_SHIFT)?NATIVE_EVENT_SHIFT_TAB:9u);
+        else if(event->code==KEY_UP)native_push_event_slot(slot,NATIVE_EVENT_UP);
         else if(event->code==KEY_DOWN)native_push_event_slot(slot,NATIVE_EVENT_DOWN);
         else if(event->code==KEY_LEFT)native_push_event_slot(slot,NATIVE_EVENT_LEFT);
         else if(event->code==KEY_RIGHT)native_push_event_slot(slot,NATIVE_EVENT_RIGHT);

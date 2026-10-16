@@ -36,7 +36,7 @@ NATIVE_BINS := $(addprefix $(BUILD)/apps/,$(addsuffix .bin,$(NATIVE_APPS)))
 # Keep intermediate native objects so the whole Ring 3 ISA audit can be
 # rerun without recompiling or silently skipping application entry points.
 .SECONDARY: $(addprefix $(BUILD)/apps/,$(addsuffix .native.o,$(NATIVE_APPS)))
-$(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h apps/native/game_logic.h Makefile
+$(BUILD)/apps/%.native.o: apps/native/%.c apps/native/oxp.h apps/native/ui_widgets.h apps/native/ui_pointer.h apps/native/ui_atlas.h apps/native/font_engine.h apps/native/game_logic.h apps/native/edit_session.h apps/native/paint_history.h apps/native/file_workflow.h apps/native/file_picker.h kernel/gui/editor_keycodes.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/apps/native_runtime.o: apps/native/runtime.c Makefile
@@ -48,23 +48,57 @@ $(BUILD)/apps/native_start.o: apps/native/start.S
 $(BUILD)/apps/%.bin: $(BUILD)/apps/%.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o apps/native/app.ld
 	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $< $(BUILD)/apps/native_runtime.o -o $@
 $(BUILD)/apps/windowd.native.o $(BUILD)/apps/winclient.native.o: apps/native/wm_protocol.h
-$(BUILD)/apps/native_scene.o: apps/native/native_scene.c apps/native/native_scene.h apps/native/shell_raster.h Makefile
+$(BUILD)/apps/native_scene.o: apps/native/native_scene.c apps/native/native_scene.h apps/native/shell_raster.h apps/native/skin.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/skin.o: apps/native/skin.c apps/native/skin.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/skin/aurora-widgets.oxua $(BUILD)/skin/aurora-icons.oxua $(BUILD)/skin/aurora-chrome.oxua $(BUILD)/skin/aurora-menu.oxua $(BUILD)/skin/aurora-toolbar.oxua &: tools/pack_ui_atlases.py tools/pack_skin.py assets/ui/aurora/widgets-atlas.png assets/ui/aurora/icons-32.png assets/ui/aurora/chrome-strip.png assets/ui/aurora/menu-atlas.png assets/ui/aurora/toolbar-atlas.png
+	@mkdir -p $(BUILD)/skin
+	python3 tools/pack_ui_atlases.py --source assets/ui/aurora --output $(BUILD)/skin
+$(BUILD)/skin/aurora-font.oxft: tools/pack_aurora_font.py tools/pack_skin.py assets/ui/aurora/fonts/aurora-font.png
+	@mkdir -p $(dir $@)
+	python3 tools/pack_aurora_font.py assets/ui/aurora/fonts/aurora-font.png $@
+$(BUILD)/skin/aurora.oxs: tools/pack_skin.py $(wildcard assets/ui/aurora/*.png)
+	@mkdir -p $(dir $@)
+	python3 tools/pack_skin.py $@ --source assets/ui/aurora
+# Theme variants are original editable PNG artwork, not generated at build.
+# The Blue pack retains its existing aurora.* filenames for compatibility.
+$(BUILD)/skin/olive-widgets.oxua $(BUILD)/skin/olive-icons.oxua $(BUILD)/skin/olive-chrome.oxua $(BUILD)/skin/olive-menu.oxua $(BUILD)/skin/olive-toolbar.oxua &: tools/pack_ui_atlases.py tools/pack_skin.py assets/ui/aurora/olive/widgets-atlas.png assets/ui/aurora/olive/icons-32.png assets/ui/aurora/olive/chrome-strip.png assets/ui/aurora/olive/menu-atlas.png assets/ui/aurora/olive/toolbar-atlas.png
+	@mkdir -p $(BUILD)/skin
+	python3 tools/pack_ui_atlases.py --source assets/ui/aurora/olive --output $(BUILD)/skin --prefix olive
+$(BUILD)/skin/midnight-widgets.oxua $(BUILD)/skin/midnight-icons.oxua $(BUILD)/skin/midnight-chrome.oxua $(BUILD)/skin/midnight-menu.oxua $(BUILD)/skin/midnight-toolbar.oxua &: tools/pack_ui_atlases.py tools/pack_skin.py assets/ui/aurora/midnight/widgets-atlas.png assets/ui/aurora/midnight/icons-32.png assets/ui/aurora/midnight/chrome-strip.png assets/ui/aurora/midnight/menu-atlas.png assets/ui/aurora/midnight/toolbar-atlas.png
+	@mkdir -p $(BUILD)/skin
+	python3 tools/pack_ui_atlases.py --source assets/ui/aurora/midnight --output $(BUILD)/skin --prefix midnight
+$(BUILD)/skin/olive.oxs: tools/pack_skin.py $(wildcard assets/ui/aurora/olive/*.png)
+	@mkdir -p $(dir $@)
+	python3 tools/pack_skin.py $@ --source assets/ui/aurora/olive
+$(BUILD)/skin/midnight.oxs: tools/pack_skin.py $(wildcard assets/ui/aurora/midnight/*.png)
+	@mkdir -p $(dir $@)
+	python3 tools/pack_skin.py $@ --source assets/ui/aurora/midnight
 $(BUILD)/apps/wallpaper.o: apps/native/wallpaper.c apps/native/wallpaper.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/shell_icons.o: apps/native/shell_icons.c apps/native/shell_icons.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/shell_menu_art.o: apps/native/shell_menu_art.c apps/native/shell_menu_art.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/apps/windowd.native.o: apps/native/shell_menu_art.h apps/native/theme.h
+$(BUILD)/apps/windowd.native.o: apps/native/shell_layout.h apps/native/shell_icons.h apps/native/shell_interaction.h
 $(BUILD)/apps/windowd.native.o: apps/native/native_scene.h
 $(BUILD)/apps/windowd.native.o: kernel/user/wm_display.h
-$(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h kernel/user/shell_abi.h Makefile
+$(BUILD)/apps/shell_raster.o: apps/native/shell_raster.c apps/native/shell_raster.h apps/native/font_engine.h kernel/user/shell_abi.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -Ikernel -c $< -o $@
 $(BUILD)/apps/wm_protocol.o: apps/native/wm_protocol.c apps/native/wm_protocol.h Makefile
 	@mkdir -p $(dir $@)
 	$(CC) -target x86_64-unknown-none-elf -std=c11 -Os -ffreestanding -fno-builtin -fno-stack-protector -fpie $(RING3_CPU_FLAGS) -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o apps/native/app.ld tools/check_windowd_pic.py
-	python3 tools/check_windowd_pic.py $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o
-	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o -Map $(BUILD)/apps/windowd.map -o $@
+$(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_start.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o $(BUILD)/apps/skin.o $(BUILD)/apps/shell_icons.o $(BUILD)/apps/shell_menu_art.o apps/native/app.ld tools/check_windowd_pic.py
+	python3 tools/check_windowd_pic.py $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o $(BUILD)/apps/skin.o $(BUILD)/apps/shell_icons.o $(BUILD)/apps/shell_menu_art.o
+	$(LD) -m elf_x86_64 --oformat binary -T apps/native/app.ld $(BUILD)/apps/native_start.o $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_runtime.o $(BUILD)/apps/wm_protocol.o $(BUILD)/apps/shell_raster.o $(BUILD)/apps/native_scene.o $(BUILD)/apps/wallpaper.o $(BUILD)/apps/skin.o $(BUILD)/apps/shell_icons.o $(BUILD)/apps/shell_menu_art.o -Map $(BUILD)/apps/windowd.map -o $@
 	python3 tools/check_windowd_bss.py $(BUILD)/apps/windowd.map
 # Inspect the *actual compiled object code*; changes to toolchain defaults
 # must not silently reintroduce unsupported SIMD/FPU instructions.
@@ -72,7 +106,7 @@ $(BUILD)/apps/windowd.bin: $(BUILD)/apps/windowd.native.o $(BUILD)/apps/native_s
 $(BUILD)/apps/.ring3-isa-ok: $(NATIVE_BINS) $(BUILD)/apps/hello.o $(BUILD)/apps/fault.o tools/check_ring3_isa.py
 	python3 tools/check_ring3_isa.py $(BUILD)/apps
 	@touch $@
-$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) $(BUILD)/apps/.ring3-isa-ok tools/mkinitrd.py $(wildcard assets/wallpapers/*.bmp)
+$(BUILD)/initrd.img: $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS) $(BUILD)/apps/.ring3-isa-ok tools/mkinitrd.py $(wildcard assets/wallpapers/*.bmp) $(BUILD)/skin/aurora.oxs $(BUILD)/skin/aurora-widgets.oxua $(BUILD)/skin/aurora-icons.oxua $(BUILD)/skin/olive.oxs $(BUILD)/skin/olive-widgets.oxua $(BUILD)/skin/olive-icons.oxua $(BUILD)/skin/midnight.oxs $(BUILD)/skin/midnight-widgets.oxua $(BUILD)/skin/midnight-icons.oxua $(BUILD)/skin/aurora-chrome.oxua $(BUILD)/skin/olive-chrome.oxua $(BUILD)/skin/midnight-chrome.oxua $(BUILD)/skin/midnight-menu.oxua $(BUILD)/skin/aurora-menu.oxua $(BUILD)/skin/olive-menu.oxua $(BUILD)/skin/aurora-toolbar.oxua $(BUILD)/skin/olive-toolbar.oxua $(BUILD)/skin/midnight-toolbar.oxua $(BUILD)/skin/aurora-font.oxft
 	python3 tools/mkinitrd.py $@ $(BUILD)/apps/hello.bin $(BUILD)/apps/fault.bin $(NATIVE_BINS)
 $(BUILD)/fs/initrd_data.o: $(BUILD)/initrd.img
 $(BUILD)/openxp.elf: $(OBJECTS) kernel/linker.ld
@@ -199,7 +233,7 @@ test-window-protocol-sanitize:
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
 	build/tests/wm_capipc_sanitized
 
-test-unit: test-windowd-pic test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
+test-unit: test-aurora17 test-aurora16 test-aurora15 test-aurora14 test-aurora13 test-advanced-input test-native-pointer test-shell-interaction test-font-fit test-font-engine test-aurora-font-png test-shell-menu-art test-calculator-layout test-aurora-themes test-shell-icons test-ui-atlas test-native-widgets test-native-scene-skin test-skin test-windowd-pic test-native-scroll test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
 	build/tests/native_wait_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
@@ -223,7 +257,7 @@ test-unit: test-windowd-pic test-native-text-layout test-native-layout test-wall
 	build/tests/initrd_image_test $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_test
 	build/tests/process_manager_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_test
 	build/tests/syscall_test
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
 	build/tests/process_test
@@ -254,7 +288,7 @@ test-unit: test-windowd-pic test-native-text-layout test-native-layout test-wall
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
 	build/tests/sync_test
 
-test-sanitize: test-native-text-layout-sanitize test-native-layout-sanitize test-wallpaper-sanitize test-native-scene-sanitize test-shell-raster-sanitize test-compositor-integration-sanitize test-native-games-sanitize test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
+test-sanitize: test-aurora17-sanitize test-aurora16-sanitize test-aurora15-sanitize test-aurora14-sanitize test-aurora13-sanitize test-advanced-input-sanitize test-native-pointer-sanitize test-shell-interaction-sanitize test-font-engine-sanitize test-shell-menu-art-sanitize test-calculator-layout-sanitize test-aurora-themes test-shell-icons-sanitize test-ui-atlas test-native-widgets-sanitize test-native-scene-skin-sanitize test-skin-sanitize test-native-scroll-sanitize test-native-text-layout-sanitize test-native-layout-sanitize test-wallpaper-sanitize test-native-scene-sanitize test-shell-raster-sanitize test-compositor-integration-sanitize test-native-games-sanitize test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
 	build/tests/native_wait_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
@@ -275,7 +309,7 @@ test-sanitize: test-native-text-layout-sanitize test-native-layout-sanitize test
 	build/tests/initrd_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_sanitized
 	build/tests/process_manager_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c -o build/tests/syscall_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_sanitized
 	build/tests/syscall_sanitized
 	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
 	build/tests/process_sanitized
@@ -382,11 +416,11 @@ test-shell-raster-sanitize:
 .PHONY: test-native-scene test-native-scene-sanitize
 test-native-scene:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c -o $(BUILD)/tests/native_scene_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_test
 	$(BUILD)/tests/native_scene_test
 test-native-scene-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c -o $(BUILD)/tests/native_scene_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_sanitized
 	$(BUILD)/tests/native_scene_sanitized
 
 # Regression: incremental desktop regions must exactly match a full composed
@@ -434,3 +468,217 @@ test-native-text-layout-sanitize:
 .PHONY: test-windowd-pic
 test-windowd-pic:
 	python3 -m unittest discover -s tests -p "windowd_pic_test.py" -v
+
+.PHONY: test-native-scroll test-native-scroll-sanitize
+test-native-scroll:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scroll_test.c -o $(BUILD)/tests/native_scroll_test
+	$(BUILD)/tests/native_scroll_test
+test-native-scroll-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scroll_test.c -o $(BUILD)/tests/native_scroll_sanitized
+	$(BUILD)/tests/native_scroll_sanitized
+
+.PHONY: test-skin test-skin-sanitize
+test-skin: $(BUILD)/skin/aurora.oxs
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/skin_test.c apps/native/skin.c -o $(BUILD)/tests/skin_test
+	$(BUILD)/tests/skin_test $(BUILD)/skin/aurora.oxs
+test-skin-sanitize: $(BUILD)/skin/aurora.oxs
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/skin_test.c apps/native/skin.c -o $(BUILD)/tests/skin_sanitized
+	$(BUILD)/tests/skin_sanitized $(BUILD)/skin/aurora.oxs
+
+.PHONY: test-native-scene-skin test-native-scene-skin-sanitize
+test-native-scene-skin: $(BUILD)/skin/aurora.oxs
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_skin_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_test
+	$(BUILD)/tests/native_scene_skin_test $(BUILD)/skin/aurora.oxs
+test-native-scene-skin-sanitize: $(BUILD)/skin/aurora.oxs
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_skin_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_sanitized
+	$(BUILD)/tests/native_scene_skin_sanitized $(BUILD)/skin/aurora.oxs
+
+.PHONY: test-calculator-layout test-calculator-layout-sanitize
+test-calculator-layout:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/calculator_layout_test.c -o $(BUILD)/tests/calculator_layout_test
+	$(BUILD)/tests/calculator_layout_test
+test-calculator-layout-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/calculator_layout_test.c -o $(BUILD)/tests/calculator_layout_sanitized
+	$(BUILD)/tests/calculator_layout_sanitized
+
+.PHONY: test-native-widgets test-native-widgets-sanitize
+test-native-widgets:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_widgets_test.c -o $(BUILD)/tests/native_widgets_test
+	$(BUILD)/tests/native_widgets_test
+test-native-widgets-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_widgets_test.c -o $(BUILD)/tests/native_widgets_sanitized
+	$(BUILD)/tests/native_widgets_sanitized
+
+.PHONY: test-ui-atlas
+test-ui-atlas: $(BUILD)/skin/aurora-widgets.oxua $(BUILD)/skin/aurora-icons.oxua $(BUILD)/skin/aurora-chrome.oxua $(BUILD)/skin/aurora-menu.oxua $(BUILD)/skin/olive-menu.oxua $(BUILD)/skin/midnight-menu.oxua
+	python3 -m unittest discover -s tests -p 'test_ui_atlases.py' -v
+
+# Aurora 7 menu skin parser/9-slice tests.
+.PHONY: test-shell-menu-art test-shell-menu-art-sanitize
+test-shell-menu-art: $(BUILD)/skin/aurora-menu.oxua
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_menu_art_test.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_test
+	$(BUILD)/tests/shell_menu_art_test $(BUILD)/skin/aurora-menu.oxua
+test-shell-menu-art-sanitize: $(BUILD)/skin/aurora-menu.oxua
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_menu_art_test.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_sanitized
+	$(BUILD)/tests/shell_menu_art_sanitized $(BUILD)/skin/aurora-menu.oxua
+.PHONY: test-shell-icons test-shell-icons-sanitize
+# Pure tests run without a VM, using the exact native-format atlas parser.
+test-shell-icons:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_icons_test.c apps/native/shell_icons.c -o build/tests/shell_icons_test
+	build/tests/shell_icons_test
+test-shell-icons-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_icons_test.c apps/native/shell_icons.c -o build/tests/shell_icons_sanitized
+	build/tests/shell_icons_sanitized
+
+.PHONY: test-aurora-themes
+test-aurora-themes: $(BUILD)/initrd.img $(BUILD)/skin/aurora.oxs $(BUILD)/skin/olive.oxs $(BUILD)/skin/midnight.oxs $(BUILD)/skin/aurora-widgets.oxua $(BUILD)/skin/olive-widgets.oxua $(BUILD)/skin/midnight-widgets.oxua $(BUILD)/skin/aurora-icons.oxua $(BUILD)/skin/olive-icons.oxua $(BUILD)/skin/midnight-icons.oxua $(BUILD)/skin/aurora-chrome.oxua $(BUILD)/skin/olive-chrome.oxua $(BUILD)/skin/midnight-chrome.oxua $(BUILD)/skin/midnight-menu.oxua $(BUILD)/skin/aurora-menu.oxua $(BUILD)/skin/olive-menu.oxua $(BUILD)/skin/aurora-toolbar.oxua $(BUILD)/skin/olive-toolbar.oxua $(BUILD)/skin/midnight-toolbar.oxua $(BUILD)/skin/aurora-font.oxft
+	python3 -m unittest discover -s tests -p 'test_aurora_themes.py' -v
+
+# Aurora 8 font loading and proportional glyph tests.
+.PHONY: test-font-engine test-font-engine-sanitize
+$(BUILD)/tests/font_engine_test: tests/font_engine_test.c apps/native/font_engine.h apps/native/shell_raster.c
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/font_engine_test.c apps/native/shell_raster.c -o $@
+test-font-engine: $(BUILD)/skin/aurora-font.oxft $(BUILD)/tests/font_engine_test
+	$(BUILD)/tests/font_engine_test $(BUILD)/skin/aurora-font.oxft
+test-font-engine-sanitize: $(BUILD)/skin/aurora-font.oxft
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/font_engine_test.c apps/native/shell_raster.c -o $(BUILD)/tests/font_engine_sanitized
+	$(BUILD)/tests/font_engine_sanitized $(BUILD)/skin/aurora-font.oxft
+
+.PHONY: test-aurora-font-png
+test-aurora-font-png: $(BUILD)/skin/aurora-font.oxft
+	python3 -m unittest discover -s tests -p 'test_aurora_font.py' -v
+
+# Aurora 9: bounded pixel-accurate label layout regression.
+.PHONY: test-font-fit test-font-fit-sanitize
+test-font-fit:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/font_fit_test.c -o $(BUILD)/tests/font_fit_test
+	$(BUILD)/tests/font_fit_test
+
+test-font-fit-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/font_fit_test.c -o $(BUILD)/tests/font_fit_sanitized
+	$(BUILD)/tests/font_fit_sanitized
+
+# Aurora 10 release-action regression: cancel when pointer leaves an item.
+.PHONY: test-shell-interaction test-shell-interaction-sanitize
+test-shell-interaction:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_interaction_test.c -o $(BUILD)/tests/shell_interaction_test
+	$(BUILD)/tests/shell_interaction_test
+
+test-shell-interaction-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_interaction_test.c -o $(BUILD)/tests/shell_interaction_sanitized
+	$(BUILD)/tests/shell_interaction_sanitized
+
+# Aurora 11 native pointer ABI and gesture state machine (host + ASan/UBSan).
+.PHONY: test-native-pointer test-native-pointer-sanitize
+test-native-pointer:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_pointer_test.c -o build/tests/native_pointer_test
+	build/tests/native_pointer_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_pointer_kernel_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_test
+	build/tests/native_pointer_kernel_test
+
+test-native-pointer-sanitize:
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_pointer_test.c -o build/tests/native_pointer_sanitized
+	build/tests/native_pointer_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_pointer_kernel_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_sanitized
+	build/tests/native_pointer_kernel_sanitized
+
+# Aurora 12: pure gesture, continuous stroke, selection and thumb math.
+.PHONY: test-advanced-input test-advanced-input-sanitize
+test-advanced-input:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/advanced_input_test.c -o $(BUILD)/tests/advanced_input_test
+	$(BUILD)/tests/advanced_input_test
+test-advanced-input-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/advanced_input_test.c -o $(BUILD)/tests/advanced_input_sanitized
+	$(BUILD)/tests/advanced_input_sanitized
+
+# Aurora 13: bounded, cross-application clipboard + editing regression suite.
+.PHONY: test-aurora13 test-aurora13-sanitize
+test-aurora13:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora13_edit_test.c -o $(BUILD)/tests/aurora13_edit_test
+	$(BUILD)/tests/aurora13_edit_test
+test-aurora13-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora13_edit_test.c -o $(BUILD)/tests/aurora13_edit_sanitized
+	$(BUILD)/tests/aurora13_edit_sanitized
+
+# Aurora 14: document associations, tagged clipboard, double-click and
+# Open/Save-As picker validation. Pure helpers run under host sanitizers.
+.PHONY: test-aurora14 test-aurora14-sanitize
+test-aurora14:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora14_workflow_test.c -o $(BUILD)/tests/aurora14_workflow_test
+	$(BUILD)/tests/aurora14_workflow_test
+test-aurora14-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora14_workflow_test.c -o $(BUILD)/tests/aurora14_workflow_sanitized
+	$(BUILD)/tests/aurora14_workflow_sanitized
+
+# Aurora 15: per-launch data arguments, picker focus, drag/drop and storage
+.PHONY: test-aurora15 test-aurora15-sanitize
+test-aurora15:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora15_workflow_test.c -o $(BUILD)/tests/aurora15_workflow_test
+	$(BUILD)/tests/aurora15_workflow_test
+
+test-aurora15-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora15_workflow_test.c -o $(BUILD)/tests/aurora15_workflow_sanitized
+	$(BUILD)/tests/aurora15_workflow_sanitized
+
+# Aurora 16: nested-folder file destinations, editor drag targets and IPC ABI.
+.PHONY: test-aurora16 test-aurora16-sanitize
+test-aurora16:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora16_workflow_test.c -o $(BUILD)/tests/aurora16_workflow_test
+	$(BUILD)/tests/aurora16_workflow_test
+test-aurora16-sanitize:
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora16_workflow_test.c -o $(BUILD)/tests/aurora16_workflow_sanitized
+	$(BUILD)/tests/aurora16_workflow_sanitized
+
+# Aurora 17: increased RAMFS quota, transactional subtree changes, v1/v2
+# journal compatibility and full-capacity persistent roundtrip.
+.PHONY: test-aurora17 test-aurora17-sanitize
+test-aurora17: $(BUILD)/initrd.img
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs
+	build/tests/aurora17_ramfs
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs
+	build/tests/aurora17_vfs $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist
+	build/tests/aurora17_persist
+	python3 -m unittest tests/test_storage_format.py
+
+test-aurora17-sanitize: $(BUILD)/initrd.img
+	@mkdir -p build/tests
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs_san
+	build/tests/aurora17_ramfs_san
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs_san
+	build/tests/aurora17_vfs_san $(BUILD)/initrd.img
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist_san
+	build/tests/aurora17_persist_san

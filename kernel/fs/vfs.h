@@ -19,4 +19,7 @@ bool vfs_write(const char *path, const void *src, size_t length);
 bool vfs_copy(const char *from, const char *to);
 bool vfs_rename(const char *from, const char *to);
 bool vfs_remove(const char *path);
+bool vfs_mkdir(const char *path);
+bool vfs_rmdir(const char *path);
+bool vfs_stat(const char *path,size_t *size,vfs_kind_t *kind);
 #endif

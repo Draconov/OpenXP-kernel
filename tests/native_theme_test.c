@@ -11,5 +11,15 @@ int main(void){
         for(unsigned j=i+1;j<3u;++j)
             assert(oxp_theme_wallpaper(i)!=oxp_theme_wallpaper(j));
     }
-    puts("PASS: bounded three-theme native desktop palette");
+    for(unsigned i=0;i<OXP_THEME_COUNT;++i){
+        assert(oxp_theme_name(i)[0]);
+        assert(oxp_theme_skin_path(i)[0]);
+        assert(oxp_theme_widgets_path(i)[0]);
+        assert(oxp_theme_icons_path(i)[0]);
+        assert(oxp_theme_panel(i)!=0);
+        assert(oxp_theme_accent(i)!=0);
+        assert(oxp_theme_toolbar(i)!=0);
+    }
+    assert(oxp_theme_name(1)[0]=='O' && oxp_theme_name(2)[0]=='M');
+    puts("PASS: bounded three-theme palette and resource routing");
 }

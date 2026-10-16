@@ -41,9 +41,10 @@ int main(void){
     assert(n==sizeof(canvas) && !memcmp(canvas,copy,n));
     assert(!ramfs_write("home/large",canvas,RAMFS_FILE_CAPACITY+1));
     assert(ramfs_count()==3);
-    for(int i=0;i<12;++i){
-        char path[]="home/item-0";path[10]=(char)('a'+i);
-        if(i<9)assert(ramfs_write(path,"!",1));
+    for(unsigned i=0;i<RAMFS_MAX_FILES;++i){
+        char path[]="home/item-00";
+        path[10]=(char)('0'+i/10u);path[11]=(char)('0'+i%10u);
+        if(i<RAMFS_MAX_FILES-3u)assert(ramfs_write(path,"!",1));
         else assert(!ramfs_write(path,"!",1));
     }
     assert(ramfs_count()==RAMFS_MAX_FILES);
@@ -54,6 +55,27 @@ int main(void){
     assert(!ramfs_remove("home/note.txt"));
     assert(ramfs_write("home/freed","z",1));
     assert(ramfs_count()==RAMFS_MAX_FILES);
+    ramfs_reset();assert(ramfs_count()==0);
+    assert(ramfs_write("home/group/.oxpdir",NULL,0));
+    assert(ramfs_write("home/group/child.txt","A",1));
+    assert(ramfs_write("home/group/sub/.oxpdir",NULL,0));
+    assert(ramfs_write("home/group/sub/note.txt","B",1));
+    uint64_t r=ramfs_revision();
+    assert(!ramfs_rename_tree("home/group","home/group/sub/nested"));
+    assert(ramfs_revision()==r);
+    assert(!ramfs_rename_tree("home/group","home/"));
+    /* Failed subtree rename does not modify any entry or revision. */
+    assert(!ramfs_rename_tree("home/group","home/supercalifragilisticexpialidocious-longname"));
+    assert(ramfs_revision()==r);
+    assert(ramfs_size("home/group/sub/note.txt",&n)&&n==1);
+    assert(ramfs_rename_tree("home/group","home/renamed"));
+    assert(ramfs_revision()==r+1u);
+    assert(ramfs_size("home/renamed/sub/note.txt",&n)&&n==1);
+    assert(!ramfs_size("home/group/sub/note.txt",&n));
+    assert(ramfs_write("home/occupied/sub/note.txt","X",1));
+    r=ramfs_revision();
+    assert(!ramfs_rename_tree("home/renamed","home/occupied"));
+    assert(ramfs_revision()==r && ramfs_size("home/renamed/sub/note.txt",&n));
     ramfs_reset();assert(ramfs_count()==0);
     assert(!ramfs_read("home/painting.oxp",copy,sizeof(copy),&n));
     return 0;

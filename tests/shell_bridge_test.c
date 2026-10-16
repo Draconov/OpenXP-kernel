@@ -65,21 +65,67 @@ int main(void){
     drag.kind=INPUT_BUTTON;drag.left=false;
     assert(shell_bridge_route(&drag,false,768));
     assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_UP);
-    /* The shell owns desktop icon activation; application body input passes through. */
+    /* Shell controls activate on release: the compositor receives separate
+     * down, coalesced move and up events while owning the pointer. */
     input_event_t icon={.kind=INPUT_BUTTON,.left=true,.x=32,.y=46};
     assert(shell_bridge_route(&icon,false,768));
-    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_CLICK);
-    icon.x=300;icon.y=300;
+    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_POINTER &&
+           event.flags==OXP_SHELL_POINTER_DOWN);
+    icon.kind=INPUT_MOVE;icon.x=48;icon.y=48;
+    assert(shell_bridge_route(&icon,false,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_MOVE);
+    icon.kind=INPUT_BUTTON;icon.left=false;
+    assert(shell_bridge_route(&icon,false,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_UP);
+    icon.left=true;icon.x=300;icon.y=300;
     assert(!shell_bridge_route(&icon,false,768));
+    /* Aurora 16: regular client releases are mirrored to the shell for
+     * cross-window drop completion, never consumed from the source app. */
+    icon.left=false;icon.x=310;icon.y=320;
+    assert(!shell_bridge_route(&icon,false,768));
+    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_POINTER &&
+           event.flags==OXP_SHELL_POINTER_UP && event.x==310 && event.y==320);
+    /* Bare movement reports hover without consuming native application
+     * input. Adjacent moves collapse to the most recent coordinates. */
+    input_event_t motion={.kind=INPUT_MOVE,.x=20,.y=30};
+    assert(!shell_bridge_route(&motion,false,768));
+    motion.x=30;motion.y=35;
+    assert(!shell_bridge_route(&motion,false,768));
+    motion.x=40;motion.y=40;
+    assert(!shell_bridge_route(&motion,false,768));
+    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_POINTER &&
+           event.flags==OXP_SHELL_POINTER_MOVE && event.x==40 && event.y==40);
+    assert(!shell_bridge_pop(&event));
     input_event_t mouse={.kind=INPUT_BUTTON,.left=true,.x=40,.y=740};
     assert(shell_bridge_route(&mouse,false,768));
-    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_CLICK && event.x==40);
+    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_POINTER &&
+           event.flags==OXP_SHELL_POINTER_DOWN && event.x==40);
+    /* Releasing over a different target gives windowd a chance to cancel. */
+    mouse.kind=INPUT_MOVE;mouse.x=250;mouse.y=740;
+    assert(shell_bridge_route(&mouse,false,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_MOVE);
+    mouse.kind=INPUT_BUTTON;mouse.left=false;
+    assert(shell_bridge_route(&mouse,false,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_UP);
+    /* Neither pointer movement nor release can swallow keyboard input. */
+    motion=(input_event_t){.kind=INPUT_MOVE,.x=88,.y=88};
+    assert(!shell_bridge_route(&motion,false,768));
     key.code=KEY_CHARACTER;key.key='z';
     assert(!shell_bridge_route(&key,false,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_MOVE);
+    assert(!shell_bridge_pop(&event));
     assert(shell_bridge_action(OXP_SHELL_MENU,1,0));
     assert(shell_bridge_menu_open());
     assert(shell_bridge_route(&key,true,768));
-    assert(shell_bridge_pop(&event));
+    assert(shell_bridge_pop(&event) && event.type==OXP_SHELL_EVENT_KEY);
+    /* Clicking outside an open menu must first dismiss it, not accidentally
+     * activate the application behind the popup. */
+    mouse=(input_event_t){.kind=INPUT_BUTTON,.left=true,.x=800,.y=300};
+    assert(shell_bridge_route(&mouse,true,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_DOWN);
+    mouse.left=false;
+    assert(shell_bridge_route(&mouse,true,768));
+    assert(shell_bridge_pop(&event) && event.flags==OXP_SHELL_POINTER_UP);
     oxp_shell_draw_t invalid=cmd;invalid.w=1025;
     assert(!shell_bridge_submit(7,&invalid,1,6));
     invalid=cmd;invalid.op=OXP_SHELL_TEXT;

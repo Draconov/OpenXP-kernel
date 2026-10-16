@@ -24,6 +24,7 @@ struct process {
     address_space_t space;
     uint64_t entry;
     uint64_t user_stack_top;
+    char launch_arg[PROCESS_LAUNCH_ARG_MAX];
     uint64_t owner_thread, kernel_continuation;
     uint64_t kernel_stack_guard;
     uint64_t kernel_stack_pages[PROCESS_STACK_PAGES];
@@ -176,6 +177,24 @@ uint64_t process_create_elf(const void *image, size_t length) {
 fail:
     discard(p);
     return 0;
+}
+bool process_set_launch_arg(uint64_t pid,const char *arg){
+    struct process *p=lookup(pid);
+    if(!p || p->info.state!=PROCESS_READY || !interrupts_masked() || !arg)return false;
+    size_t n=0;
+    while(n<PROCESS_LAUNCH_ARG_MAX && arg[n])++n;
+    if(n>=PROCESS_LAUNCH_ARG_MAX)return false;
+    for(size_t i=0;i<=n;++i)p->launch_arg[i]=arg[i];
+    return true;
+}
+size_t process_current_launch_arg(char *out,size_t cap){
+    struct process *p=running_here();
+    if(!p||!out)return 0;
+    size_t n=0;
+    while(n<PROCESS_LAUNCH_ARG_MAX && p->launch_arg[n])++n;
+    if(!n || n>=PROCESS_LAUNCH_ARG_MAX || cap<=n)return 0;
+    for(size_t i=0;i<=n;++i)out[i]=p->launch_arg[i];
+    return n;
 }
 bool process_state_terminal(process_state_t s) {
     return s == PROCESS_EXITED || s == PROCESS_FAULTED;

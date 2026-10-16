@@ -1,4 +1,45 @@
+## Aurora 16 — Desktop Filesystem & Window Integration
+
+Editable Documents subfolders, bounded file metadata/Properties, safe file
+copies into nested folders, opt-in document drag/drop to new editor instances,
+and a saved Show/Hide Desktop Icons preference. Terminal supports MKDIR,
+RMDIR and STAT. Read the [Aurora 16 guide](docs/AURORA-16.md) for exact
+limits, security boundaries and VM verification status.
+
+## Aurora 15 — Filesystem & Application Integration
+
+Ring 3 editors now receive Explorer document paths as **process-scoped launch
+arguments**, rather than shared mailbox files. The shared Open/Save picker
+supports filename editing, focus traversal and double-click. Explorer can
+copy ordinary files onto its Documents shortcut by dragging, while an opt-in
+formatted data disk supports status/queued flush requests and safer automatic
+commit timing. Standard builds remain RAM-only. See
+[docs/AURORA-15.md](docs/AURORA-15.md) and [docs/STORAGE.md](docs/STORAGE.md).
+
+## Aurora 9 — Measured Typography and Clipped Labels
+
+Native application labels now use proportional pixel metrics, safe `...` clipping
+inside each widget, and updated Explorer/WordPad chrome. Selected Bold and zoom
+states use toolbar artwork. All three editable theme packs are included.
+See [Aurora 9 notes](docs/AURORA-9.md).
+
+## Aurora 8 — Typography and Toolbars
+
+New editable font and toolbar artwork, a proportional alpha font renderer in Ring 3, and shared themed toolbar controls are documented in [docs/AURORA-8.md](docs/AURORA-8.md).
+
 # OpenXP
+
+**Aurora 6:** Original PNG artwork now directly controls shared **application
+headers, toolbars and status bars** in all three themes, with additional native
+applications using themed widgets and fixed mouse geometry. See
+[the Aurora 6 guide](docs/AURORA-6.md) for edit-ready sprite dimensions,
+coverage and remaining limitations.
+
+
+**Aurora 5:** Ring 3 desktop appearance now switches complete editable PNG-backed
+Blue, Olive Green and Midnight packs through Settings. See
+[the theme guide](docs/AURORA-THEMES.md) for artwork paths, build steps,
+limits and live reload behavior.
 
 **An open-source, Windows XP-inspired operating system experiment.**
 
@@ -151,8 +192,8 @@ A maximized window can be minimized without losing its saved layout.
 Keyboard shortcuts: **Win+Up** maximizes the active window; **Win+Down**
 restores it (or minimizes it when already restored).
 
-Native windows now reflow on resize/maximize/restore: their protected 320×180
-pixel buffers display a dynamically sized logical canvas that fills the window
+Native windows now reflow on resize/maximize/restore: their protected bounded
+RGB565 buffers (up to 640×360) display a dynamically sized canvas that fills the window
 client area without letterboxing. The native SDK exposes the logical width
 and height and receives `OXP_RESIZE` events; editor rows, buttons, palettes,
 file lists, game grids, and input hit areas follow the new geometry.
@@ -369,3 +410,114 @@ related parser regression with `make test-windowd-pic`. This is an interim
 safeguard, not a replacement for proper loadable ELF images and relocation
 processing; native applications beyond `windowd` should receive a full
 relocation audit before being considered VM-validated.
+
+### Native window surfaces and design direction
+
+Ring 3 native apps now grow their logical drawing canvas with the window size,
+up to 640x360 within bounded RGB565 allocations. WordPad and File Manager have
+scrollable content areas with visible controls. See
+[visual-system proposal](docs/VISUAL-SYSTEM.md) for a plan to replace the
+programmatically painted desktop with artist-designed reusable window chrome,
+icons, taskbar and controls. QEMU smoke verification is required after changes.
+
+## Aurora art-based skin engine (stage 1)
+
+OpenXP now supports editable PNG window-frame and taskbar artwork. Ring 3
+`windowd` loads a validated `OXSK` resource from the read-only initrd, and
+rasterizes 9-slice frames, inactive/active window chrome and stateful caption
+controls with alpha transparency. A damaged/missing resource is nonfatal: the
+previous procedural renderer remains the fallback. No PNG decoding runs in the OS.
+
+Edit the 5 PNG masters in `assets/ui/aurora/`, push or rebuild, and restart.
+The converter requires only Python 3's standard library. Read
+[`docs/SKIN-ENGINE.md`](docs/SKIN-ENGINE.md) for exact dimensions, atlas layout,
+and the unfinished work (custom fonts, app widgets, icons, and legacy windows).
+
+### Aurora 2 — editable artwork and shared native widgets
+
+Actual source artwork is included at `assets/ui/aurora/`. Open
+`assets/ui/aurora/AURORA-ARTWORK-PREVIEW.png` for a single visual index.
+The first five PNG sprite files are loaded as the runtime window/taskbar skin.
+A unified widget library in `apps/native/ui_widgets.h` now styles Run,
+Settings, WordPad and File Manager. The separately included icons and control
+atlas are editable design masters awaiting the next bitmap rendering pass.
+See [Aurora widgets](docs/AURORA-WIDGETS.md) for details and limitations.
+
+
+### Aurora 3 bitmap widgets
+
+Original widget and icon PNG masters now render inside native applications via a bounded bitmap syscall and separately validated OXUA resource packs. See [Aurora bitmap controls](docs/AURORA-BITMAP-CONTROLS.md).
+
+
+### Aurora 4 — Desktop & Explorer Polish
+
+Desktop shortcuts and the Start menu now use the same editable bitmap icon
+atlas as File Manager. New icons, taskbar icons, hover styling, bounded
+text layout and a unified Start menu layout are documented in
+[`docs/AURORA-DESKTOP.md`](docs/AURORA-DESKTOP.md).
+Run `make test-shell-icons` for the new standalone regression tests.
+
+## Aurora 7 — Start menu artwork
+
+Aurora 7 adds image-backed Start-menu backgrounds, title/header, highlighted
+items, hover states, footer and centered desktop-label hover plates. All three
+themes have original editable `menu-atlas.png` masters. More details, sprite
+coordinates, limits and tests: [docs/AURORA-7.md](docs/AURORA-7.md).
+
+
+### Aurora 10 — Desktop interaction polish
+
+Ring 3 Start menu/desktop/taskbar pointer hover, release-only shell actions,
+short Start feedback animation, input-queue movement coalescing, improved
+keyboard menu navigation and layer-aware redraw suppression. All editable
+Aurora theme sprites remain included. See `docs/AURORA-10.md` for details
+and testing limits.
+
+### Aurora 11 — native control interactions
+
+Native Aurora applications now opt into continuous pointer input (MOVE, DOWN,
+UP, LEAVE) and render shared button/toolbar/tab/menu hover and held states.
+Actions fire on valid mouse release, cancel when released elsewhere, and
+support Tab/Shift+Tab and Enter focus navigation. Old native click-only
+clients remain compatible. See [`docs/AURORA-11.md`](docs/AURORA-11.md).
+
+
+## Aurora 12 — Advanced Input & Editing
+
+Paint supports continuous drag strokes, WordPad and Notepad support drag-to-
+select and selected-text replacement, and the WordPad, Notepad, and File
+Manager scrollbars support direct thumb dragging. The shared gesture input
+path is opt-in, preserving older native applications. See
+[`docs/AURORA-12.md`](docs/AURORA-12.md) for implementation, tests,
+limitations, and manual VM checks. All Aurora editable PNG artwork is retained.
+
+## Aurora 13 — clipboard, Undo/Redo and keyboard text editing
+
+Aurora 13 adds a shared bounded clipboard (Ctrl+C/X/V), twelve-state text
+histories with typing coalescing (Ctrl+Z/Y), eight-state Paint stroke history,
+Ctrl+A, Shift+Arrow and Home/End selection, and larger-window Edit toolbars for
+Notepad and WordPad. All three Aurora themes and their PNG masters are retained.
+Details, limits and VM testing checklist: [`docs/AURORA-13.md`](docs/AURORA-13.md).
+
+## Aurora 14 — File Management & Document Workflows
+
+Explorer now offers real timed double-click, per-document type associations,
+context-menu and keyboard file Copy/Cut/Paste into Home/My Documents, plus
+collision-safe duplicate names. Notepad, WordPad, and Paint share a small
+Aurora-themed Open/Save As picker; target-specific document mailboxes avoid
+cross-editor handoff collisions. Existing read-only filesystem boundaries and
+the executable allowlist remain enforced. For limitations and test commands,
+see [`docs/AURORA-14.md`](docs/AURORA-14.md).
+
+
+## Aurora 17 — expanded writable files and opt-in persistence
+
+OpenXP's HOME now accepts **48 files/folder records** instead of 12, with a
+maximum of **16 KiB per file**. File Manager supports renaming folders and
+cut/paste moving folders within HOME without rewriting their contents.
+An expanded `OXPDISK2` CRC-journal format allows a fully populated RAMFS to
+be checkpointed on a dedicated 2 MiB IDE data image. Old `OXPDISK1` images
+remain supported with their original smaller capacity; no automatic migration
+or reformat occurs. The default ISO is still RAM-only. Details and tests:
+[`docs/AURORA-17.md`](docs/AURORA-17.md) and
+[`docs/STORAGE.md`](docs/STORAGE.md).
