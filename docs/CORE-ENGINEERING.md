@@ -207,7 +207,7 @@ The loader (`kernel/user/elf.c`) accepts a **restricted** subset of little-endia
 AMD64 ELF64:
 
 - Static `ET_EXEC` images and relocation-free, position-independent `ET_DYN`.
-- Up to 16 loadable segments, at most 1 MiB per segment, and 256 pages total.
+- Up to 16 loadable segments, at most 2 MiB per segment, and 768 loaded pages total.
 - Checked offsets, alignment, executable entry points and page bounds.
 - Readable segments, zero-filled memory and rejection of writable-executable
   mappings (W^X).
@@ -215,6 +215,16 @@ AMD64 ELF64:
 Dynamic linking, ELF interpreters, relocations, TLS and standard general-purpose
 PIE executables are unsupported. A failed load can leave partial mappings;
 the caller must destroy that address space rather than reusing it.
+
+**Native flat-image constraint:** `apps/native/app.ld` combines linked `.data`
+with the read-only `.text` payload; `tools/mkinitrd.py` maps only the following
+page-aligned `.bss` region writable. Do not use initialized mutable globals in
+`windowd` (including `static int value = -1`): declare them zero-initialized
+and set their runtime defaults at the start of `oxp_main`. The `windowd` link
+map validator inspects **input** `.data` sections nested inside RX `.text`,
+not merely the output `.data` section, and aborts the build if it finds them.
+This is a limitation of the interim native packer; a future multi-segment
+loader should represent initialized writable data in a real RW PT_LOAD.
 
 The build packs `bin/hello`, `bin/fault`, native programs `bin/calculator`,
 `bin/clock`, `bin/notepad`, a native ABI probe, and a text file into the embedded

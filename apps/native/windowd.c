@@ -59,8 +59,8 @@ static int drag_document_x,drag_document_y,drag_document_active;
 static int menu_hover;
 /* Hover/press states are transient and never persisted with appearance packs.
  * A release on another control cancels the original press. */
-static int start_hover,task_hover=-1;
-static int shell_press_target=-1;
+static int start_hover,task_hover;
+static int shell_press_target;
 static unsigned start_glow;
 static int background_visual_dirty,overlay_visual_dirty;
 

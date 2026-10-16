@@ -6,6 +6,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 from check_windowd_pic import unsafe_relocations
+from check_windowd_bss import check_map
 
 
 class WindowdPicTests(unittest.TestCase):
@@ -21,6 +22,35 @@ class WindowdPicTests(unittest.TestCase):
 
     def test_empty_relocations_are_valid(self):
         self.assertEqual(unsafe_relocations("There are no relocations in this file."), [])
+
+
+    def test_reject_initialized_input_data_hidden_in_rx_text(self):
+        # lld's map folds .data into the .text output section. Looking only
+        # for the (absent) standalone output .data missed the Aurora 17 crash.
+        link_map = """          100000           100000      7d70    16 .text
+          107d68           107d68         8     4 build/apps/windowd.native.o:(.data)
+          107d68           107d68         4     1                 task_hover
+          107d6c           107d6c         4     1                 shell_press_target
+          108000           108000    191b28    16 .bss
+"""
+        with self.assertRaisesRegex(ValueError, "initialized writable input section"):
+            check_map(link_map)
+
+    def test_accept_zero_initialized_globals(self):
+        link_map = """          100000           100000      7d68    16 .text
+          107d68           107d68         0     4 build/apps/windowd.native.o:(.data)
+          108000           108000    191b28    16 .bss
+          108000           108000        16     4 build/apps/windowd.native.o:(.bss)
+"""
+        self.assertEqual(check_map(link_map), 0x191b28)
+
+    def test_reject_data_sections_other_than_plain_data(self):
+        for section in (".data.x", ".sdata", ".tdata", ".init_array", ".got"):
+            with self.subTest(section=section):
+                link_map = ("  100000  100000  8  1 build/apps/test.o:(" + section + ")\n"
+                            "  108000  108000  100  16 .bss\n")
+                with self.assertRaises(ValueError):
+                    check_map(link_map)
 
 
 if __name__ == "__main__":
