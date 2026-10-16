@@ -4,7 +4,7 @@ Do not run this script as part of the build: artists own the resulting files.
 Pillow is an authoring-only dependency, not required to pack or boot OpenXP.
 """
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import colorsys
 BASE=Path(__file__).resolve().parents[1]/'assets/ui/aurora'
 FILES=('frame-active.png','frame-inactive.png','caption-buttons.png','taskbar.png','start.png','widgets-atlas.png','icons-32.png')
@@ -45,22 +45,5 @@ def make():
             im=Image.open(BASE/file).convert('RGBA')
             im.putdata([recolor(v,theme,file) for v in list(im.getdata())])
             im.save(out/file,optimize=True)
-    # source-based preview with rows of exact final PNGs, not a fake VM screenshot
-    w,h=800,410
-    preview=Image.new('RGB',(w,h),'#131927');d=ImageDraw.Draw(preview)
-    for row,(name,where) in enumerate((('Aurora Blue',BASE),('Olive Green',BASE/'olive'),('Midnight',BASE/'midnight'))):
-        top=12+row*133
-        color=('#c1e2ff','#d9ebb0','#b5befb')[row]
-        d.text((16,top),name,fill=color)
-        def paste(path,x,y,width=None,height=None):
-            im=Image.open(path).convert('RGBA')
-            if width and height:im=im.resize((width,height),Image.Resampling.NEAREST)
-            preview.paste(im,(x,y),im)
-        paste(where/'frame-active.png',18,top+24,152,90)
-        paste(where/'start.png',195,top+48,144,48)
-        paste(where/'caption-buttons.png',354,top+28,108,108)
-        paste(where/'widgets-atlas.png',484,top+30,210,93)
-        paste(where/'icons-32.png',695,top+38,94,31)
-        if row<2:d.line((10,top+128,790,top+128),fill='#34465a')
-    preview.save(BASE/'AURORA-5-THEME-PREVIEW.png')
+
 if __name__=='__main__':make()

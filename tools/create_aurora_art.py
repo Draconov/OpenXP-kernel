@@ -179,46 +179,4 @@ if prior.exists():
     if old.size==(192,64):base_icons.paste(old.crop((0,32,192,64)),(0,32))
 base_icons.save(prior)
 
-# One single easy-to-find contact sheet proving masters are real graphics
-preview=Image.new('RGB',(1240,800),(221,232,248));pd=ImageDraw.Draw(preview)
-pd.rounded_rectangle((16,16,1224,784),radius=22,fill=(246,250,255),outline=(174,199,220),width=3)
-pd.text((50,34),'OpenXP / Aurora',font=f(36),fill=(27,69,119))
-pd.text((52,86),'Original editable UI artwork • PNG sprite masters',font=f(16,False),fill=(67,110,154))
-# full mock system window, built from actual source frame title gradients (not screenshot)
-wx,wy,ww,wh=53,137,752,450
-pd.rounded_rectangle((wx+8,wy+11,wx+ww+8,wy+wh+11),radius=14,fill=(129,150,173))
-pd.rounded_rectangle((wx,wy,wx+ww,wy+wh),radius=10,fill=(248,251,255),outline=(26,93,162),width=3)
-for y in range(36):
-    col=mix((13,87,176),(69,167,220),y/35)
-    pd.line((wx+3,wy+5+y,wx+ww-3,wy+5+y),fill=col,width=1)
-pd.text((wx+24,wy+13),'My Computer  •  OpenXP Explorer',font=f(20),fill=(255,255,255))
-for i in range(3):
-    tile=cap.crop((i*0+0, i*24,24,i*24+24)).resize((35,35),Image.Resampling.NEAREST)
-    preview.paste(tile,(wx+ww-130+i*40,wy+5),tile)
-pd.rectangle((wx+3,wy+45,wx+ww-3,wy+89),fill=(224,238,252))
-pd.text((wx+24,wy+58),'File     Edit     View     Favorites     Tools     Help',font=f(15,False),fill=(38,76,117))
-pd.rectangle((wx+20,wy+105,wx+210,wy+wh-30),fill=(223,237,249),outline=(180,205,231),width=2)
-pd.text((wx+38,wy+119),'SYSTEM TASKS',font=f(14),fill=(29,87,154))
-for n,t in enumerate(['My Documents','My Computer','Control Panel','Network Places']):
-    pd.text((wx+42,wy+163+n*45),t,font=f(15,False),fill=(52,103,160))
-pd.text((wx+248,wy+118),'Files and folders',font=f(20),fill=(37,86,140))
-for n,t in enumerate(['Documents','Downloads','Pictures','System Apps','Wallpaper']):
-    ico=make_icons().crop((0,0,32,32)).resize((38,38))
-    preview.paste(ico,(wx+248,wy+167+n*46),ico)
-    pd.text((wx+298,wy+174+n*46),t,font=f(16,False),fill=(46,74,103))
-# taskbar uses actual sprites
-pd.text((51,614),'Shell artwork  /  taskbar & Start',font=f(15),fill=(39,83,136))
-preview.paste(bar.resize((750,49)),(54,643),bar.resize((750,49)))
-preview.paste(start.resize((152,51)),(56,640),start.resize((152,51)))
-pd.text((839,142),'ARTIST ASSETS',font=f(21),fill=(44,86,133))
-pd.text((839,183),'Window frames',font=f(15,False),fill=(50,92,137))
-for n,name in enumerate(['frame-active.png','frame-inactive.png']):
-    img=Image.open(OUT/name).resize((110,110),Image.Resampling.NEAREST)
-    preview.paste(img,(845+n*128,219),img)
-pd.text((839,361),'Caption controls',font=f(15,False),fill=(50,92,137))
-preview.paste(cap.resize((165,165),Image.Resampling.NEAREST),(847,394),cap.resize((165,165),Image.Resampling.NEAREST))
-pd.text((838,585),'Control sprite studies',font=f(15,False),fill=(50,92,137))
-wid=Image.open(OUT/'widgets-atlas.png').resize((320,156))
-preview.paste(wid,(842,612),wid)
-preview.save(OUT/'AURORA-ARTWORK-PREVIEW.png')
-print('Wrote',len(list(OUT.glob('*.png'))),'Aurora PNGs to',OUT)
+print('Wrote editable Aurora PNG masters to', OUT)

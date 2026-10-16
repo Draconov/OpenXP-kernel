@@ -3,7 +3,7 @@
 Editable Documents subfolders, bounded file metadata/Properties, safe file
 copies into nested folders, opt-in document drag/drop to new editor instances,
 and a saved Show/Hide Desktop Icons preference. Terminal supports MKDIR,
-RMDIR and STAT. Read the [Aurora 16 guide](docs/AURORA-16.md) for exact
+RMDIR and STAT. Read the [Aurora 16 guide](docs/AURORA-RELEASES.md#aurora-16) for exact
 limits, security boundaries and VM verification status.
 
 ## Aurora 15 — Filesystem & Application Integration
@@ -14,31 +14,31 @@ supports filename editing, focus traversal and double-click. Explorer can
 copy ordinary files onto its Documents shortcut by dragging, while an opt-in
 formatted data disk supports status/queued flush requests and safer automatic
 commit timing. Standard builds remain RAM-only. See
-[docs/AURORA-15.md](docs/AURORA-15.md) and [docs/STORAGE.md](docs/STORAGE.md).
+[docs/AURORA-RELEASES.md#aurora-15](docs/AURORA-RELEASES.md#aurora-15) and [docs/FILES-AND-STORAGE.md#storage](docs/FILES-AND-STORAGE.md#storage).
 
 ## Aurora 9 — Measured Typography and Clipped Labels
 
 Native application labels now use proportional pixel metrics, safe `...` clipping
 inside each widget, and updated Explorer/WordPad chrome. Selected Bold and zoom
 states use toolbar artwork. All three editable theme packs are included.
-See [Aurora 9 notes](docs/AURORA-9.md).
+See [Aurora 9 notes](docs/AURORA-RELEASES.md#aurora-9).
 
 ## Aurora 8 — Typography and Toolbars
 
-New editable font and toolbar artwork, a proportional alpha font renderer in Ring 3, and shared themed toolbar controls are documented in [docs/AURORA-8.md](docs/AURORA-8.md).
+New editable font and toolbar artwork, a proportional alpha font renderer in Ring 3, and shared themed toolbar controls are documented in [docs/AURORA-RELEASES.md#aurora-8](docs/AURORA-RELEASES.md#aurora-8).
 
 # OpenXP
 
 **Aurora 6:** Original PNG artwork now directly controls shared **application
 headers, toolbars and status bars** in all three themes, with additional native
 applications using themed widgets and fixed mouse geometry. See
-[the Aurora 6 guide](docs/AURORA-6.md) for edit-ready sprite dimensions,
+[the Aurora 6 guide](docs/AURORA-RELEASES.md#aurora-6) for edit-ready sprite dimensions,
 coverage and remaining limitations.
 
 
 **Aurora 5:** Ring 3 desktop appearance now switches complete editable PNG-backed
 Blue, Olive Green and Midnight packs through Settings. See
-[the theme guide](docs/AURORA-THEMES.md) for artwork paths, build steps,
+[the theme guide](docs/THEMING.md#aurora-themes) for artwork paths, build steps,
 limits and live reload behavior.
 
 **An open-source, Windows XP-inspired operating system experiment.**
@@ -56,8 +56,9 @@ support. It is written primarily in freestanding C and x86-64 assembly.
 
 ![OpenXP desktop preview](docs/desktop-preview.png)
 
-*Rendered by the project's desktop code in a host test, not captured from a
-running virtual machine.*
+*The only retained preview image is rendered by the project's desktop code
+in a host test; it is not a screenshot from a running virtual machine.
+Editable Aurora theme PNGs remain in `assets/ui/aurora/`.*
 
 ## Get started
 
@@ -105,8 +106,8 @@ more complete legacy Start-menu implementations. Paint, WordPad, Terminal, File 
 Ring 3 ELF executables and Start attempts to launch these first. If a native
 process cannot launch, the previous Ring 0 implementation remains as fallback.
 These replacements are not yet feature-equivalent, and the native launcher,
-settings IPC, and input behavior still require VirtualBox verification. See [Ring 3 Shell](docs/RING3-SHELL.md),
-[IPC](docs/IPC.md) and the [Roadmap](docs/ROADMAP.md). The new mode needs real
+settings IPC, and input behavior still require VirtualBox verification. See [Ring 3 Shell](docs/CORE-ENGINEERING.md#ring3-shell),
+[IPC](docs/CORE-ENGINEERING.md#ipc) and the [Roadmap](docs/ROADMAP.md). The new mode needs real
 QEMU/VirtualBox testing before it should be considered reliable.
 
 GitHub Actions runs the build and tests and uploads available kernel/ISO build
@@ -161,7 +162,7 @@ installation**. This ISO starts OpenXP directly; it is not an installer.
 
 The default boot image is read-only. HOME files are writable in RAM but lost at reboot.
 A separate, opt-in dedicated experimental IDE disk build is described in
-[Storage](docs/STORAGE.md); it is not enabled in GitHub's standard ISO.
+[Storage](docs/FILES-AND-STORAGE.md#storage); it is not enabled in GitHub's standard ISO.
 USB input, Guest Additions, networking, shared folders, and disk installation
 are **not supported** by the current prototype.
 
@@ -210,7 +211,7 @@ OpenXP also bundles separate Ring 3 ELF64 applications. Open **Run** or
 pixel surfaces instead of sharing the framebuffer or living inside the
 kernel. The original legacy app windows remain for compatibility.
 Actual concurrent Ring 3 GUI behavior must still be verified in a VM.
-See [Native applications](docs/NATIVE-APPS.md) for the developer ABI.
+See [Native applications](docs/DESKTOP-AND-APPS.md#native-apps) for the developer ABI.
 
 **New Ring 3 application pilots:** From the existing Terminal use
 `RUN BIN/PAINT`, `RUN BIN/WORDPAD`, `RUN BIN/TERMINAL`,
@@ -227,7 +228,7 @@ The new native apps are still not fully feature-equivalent to the legacy ones.
 **Window-service experiment:** `windowd` starts automatically at normal boot.
 Use `RUN BIN/WINCLIENT` to exercise IPC-managed native window creation,
 movement, focus and closure. The kernel remains the final renderer and the
-legacy desktop is the fallback. See [IPC](docs/IPC.md).
+legacy desktop is the fallback. See [IPC](docs/CORE-ENGINEERING.md#ipc).
 
 ## Files and bundled applications
 
@@ -241,7 +242,7 @@ scanned automatically when building the kernel. Add more uncompressed 24-bit
 BMP files there to bundle them into the ISO. Wallpaper selection is not yet
 connected to the desktop renderer.
 
-See [Filesystem and wallpapers](docs/FILESYSTEM.md) for paths, limits, and
+See [Filesystem and wallpapers](docs/FILES-AND-STORAGE.md#filesystem) for paths, limits, and
 instructions. This is a virtual filesystem, **not NTFS, a Windows installation,
 or support for external Windows `.exe` binaries**.
 
@@ -334,7 +335,7 @@ window composition, and the desktop shell **still run in kernel mode**.
 None of this implies Windows `.exe` compatibility or full process isolation.
 
 For syscall definitions, native C sources, build instructions and migration
-status see [Native applications](docs/NATIVE-APPS.md).
+status see [Native applications](docs/DESKTOP-AND-APPS.md#native-apps).
 
 OpenXP does **not** support Windows programs or drivers.
 
@@ -345,28 +346,28 @@ layout and global focus/shortcut policy through bounded, kernel-validated
 commands. It does not have unrestricted framebuffer access. Legacy applications
 and window painting remain in Ring 0; the kernel restores its original shell
 if the service stops responding. The new integration test is `make smoke-shell`.
-See [Ring 3 Shell](docs/RING3-SHELL.md).
+See [Ring 3 Shell](docs/CORE-ENGINEERING.md#ring3-shell).
 
 ## Native window IPC
 
 The same boot-time `windowd` service also accepts native application IPC clients.
 `RUN BIN/WINCLIENT` demonstrates its window-management protocol, and
 `make smoke-window-ipc` checks the diagnostic two-client path under QEMU.
-See [Process IPC](docs/IPC.md) for security and verification limits.
+See [Process IPC](docs/CORE-ENGINEERING.md#ipc) for security and verification limits.
 
 ## Documentation
 
 | Guide | Contents |
 | --- | --- |
-| [Process IPC](docs/IPC.md) | Process-owned handles, message transport, Ring 3 server prototype |
-| [Filesystem and wallpapers](docs/FILESYSTEM.md) | XP-style directories, native `.exe` aliases and custom BMP assets |
-| [Architecture](docs/ARCHITECTURE.md) | Kernel design, boot sequence, memory and scheduling |
-| [Desktop and input](docs/DESKTOP.md) | Controls, rendering, shell and limitations |
-| [Userspace](docs/USERSPACE.md) | ELF loader, process model and system calls |
-| [Experimental storage](docs/STORAGE.md) | Dedicated IDE disk test and safety rules |
+| [Process IPC](docs/CORE-ENGINEERING.md#ipc) | Process-owned handles, message transport, Ring 3 server prototype |
+| [Filesystem and wallpapers](docs/FILES-AND-STORAGE.md#filesystem) | XP-style directories, native `.exe` aliases and custom BMP assets |
+| [Architecture](docs/CORE-ENGINEERING.md#architecture) | Kernel design, boot sequence, memory and scheduling |
+| [Desktop and input](docs/DESKTOP-AND-APPS.md#desktop) | Controls, rendering, shell and limitations |
+| [Userspace](docs/CORE-ENGINEERING.md#userspace) | ELF loader, process model and system calls |
+| [Experimental storage](docs/FILES-AND-STORAGE.md#storage) | Dedicated IDE disk test and safety rules |
 | [Roadmap](docs/ROADMAP.md) | Planned work, priorities and verification goals |
-| [Compositor](docs/COMPOSITOR.md) | Ring 3 stacking policy, fallback and VM checks |
-| [VFS foundation](docs/VFS.md) | Read-only boot files, writable HOME namespace, and limitations |
+| [Compositor](docs/CORE-ENGINEERING.md#compositor) | Ring 3 stacking policy, fallback and VM checks |
+| [VFS foundation](docs/FILES-AND-STORAGE.md#vfs) | Read-only boot files, writable HOME namespace, and limitations |
 
 
 ## Graphical composition boundary
@@ -393,7 +394,7 @@ Native applications now have an experimental Ring 3 window composition path:
 using read-only snapshots of their separate drawing surfaces. The kernel
 validates scanlines and transfers the completed scene to the framebuffer.
 The original desktop renderer remains a fallback, and VirtualBox parity
-is not yet confirmed. See [Compositor](docs/COMPOSITOR.md).
+is not yet confirmed. See [Compositor](docs/CORE-ENGINEERING.md#compositor).
 
 ### Ring 3 PIC build check
 
@@ -416,7 +417,7 @@ relocation audit before being considered VM-validated.
 Ring 3 native apps now grow their logical drawing canvas with the window size,
 up to 640x360 within bounded RGB565 allocations. WordPad and File Manager have
 scrollable content areas with visible controls. See
-[visual-system proposal](docs/VISUAL-SYSTEM.md) for a plan to replace the
+[visual-system proposal](docs/THEMING.md#visual-system) for a plan to replace the
 programmatically painted desktop with artist-designed reusable window chrome,
 icons, taskbar and controls. QEMU smoke verification is required after changes.
 
@@ -430,23 +431,24 @@ previous procedural renderer remains the fallback. No PNG decoding runs in the O
 
 Edit the 5 PNG masters in `assets/ui/aurora/`, push or rebuild, and restart.
 The converter requires only Python 3's standard library. Read
-[`docs/SKIN-ENGINE.md`](docs/SKIN-ENGINE.md) for exact dimensions, atlas layout,
+[`docs/THEMING.md#skin-engine`](docs/THEMING.md#skin-engine) for exact dimensions, atlas layout,
 and the unfinished work (custom fonts, app widgets, icons, and legacy windows).
 
 ### Aurora 2 — editable artwork and shared native widgets
 
 Actual source artwork is included at `assets/ui/aurora/`. Open
-`assets/ui/aurora/AURORA-ARTWORK-PREVIEW.png` for a single visual index.
+the editable sprite masters in `assets/ui/aurora/`; historical contact sheets
+were removed to keep the repository compact.
 The first five PNG sprite files are loaded as the runtime window/taskbar skin.
 A unified widget library in `apps/native/ui_widgets.h` now styles Run,
 Settings, WordPad and File Manager. The separately included icons and control
 atlas are editable design masters awaiting the next bitmap rendering pass.
-See [Aurora widgets](docs/AURORA-WIDGETS.md) for details and limitations.
+See [Aurora widgets](docs/THEMING.md#aurora-widgets) for details and limitations.
 
 
 ### Aurora 3 bitmap widgets
 
-Original widget and icon PNG masters now render inside native applications via a bounded bitmap syscall and separately validated OXUA resource packs. See [Aurora bitmap controls](docs/AURORA-BITMAP-CONTROLS.md).
+Original widget and icon PNG masters now render inside native applications via a bounded bitmap syscall and separately validated OXUA resource packs. See [Aurora bitmap controls](docs/THEMING.md#aurora-bitmap-controls).
 
 
 ### Aurora 4 — Desktop & Explorer Polish
@@ -454,7 +456,7 @@ Original widget and icon PNG masters now render inside native applications via a
 Desktop shortcuts and the Start menu now use the same editable bitmap icon
 atlas as File Manager. New icons, taskbar icons, hover styling, bounded
 text layout and a unified Start menu layout are documented in
-[`docs/AURORA-DESKTOP.md`](docs/AURORA-DESKTOP.md).
+[`docs/THEMING.md#aurora-desktop`](docs/THEMING.md#aurora-desktop).
 Run `make test-shell-icons` for the new standalone regression tests.
 
 ## Aurora 7 — Start menu artwork
@@ -462,7 +464,7 @@ Run `make test-shell-icons` for the new standalone regression tests.
 Aurora 7 adds image-backed Start-menu backgrounds, title/header, highlighted
 items, hover states, footer and centered desktop-label hover plates. All three
 themes have original editable `menu-atlas.png` masters. More details, sprite
-coordinates, limits and tests: [docs/AURORA-7.md](docs/AURORA-7.md).
+coordinates, limits and tests: [docs/AURORA-RELEASES.md#aurora-7](docs/AURORA-RELEASES.md#aurora-7).
 
 
 ### Aurora 10 — Desktop interaction polish
@@ -470,7 +472,7 @@ coordinates, limits and tests: [docs/AURORA-7.md](docs/AURORA-7.md).
 Ring 3 Start menu/desktop/taskbar pointer hover, release-only shell actions,
 short Start feedback animation, input-queue movement coalescing, improved
 keyboard menu navigation and layer-aware redraw suppression. All editable
-Aurora theme sprites remain included. See `docs/AURORA-10.md` for details
+Aurora theme sprites remain included. See `docs/AURORA-RELEASES.md#aurora-10` for details
 and testing limits.
 
 ### Aurora 11 — native control interactions
@@ -479,7 +481,7 @@ Native Aurora applications now opt into continuous pointer input (MOVE, DOWN,
 UP, LEAVE) and render shared button/toolbar/tab/menu hover and held states.
 Actions fire on valid mouse release, cancel when released elsewhere, and
 support Tab/Shift+Tab and Enter focus navigation. Old native click-only
-clients remain compatible. See [`docs/AURORA-11.md`](docs/AURORA-11.md).
+clients remain compatible. See [`docs/AURORA-RELEASES.md#aurora-11`](docs/AURORA-RELEASES.md#aurora-11).
 
 
 ## Aurora 12 — Advanced Input & Editing
@@ -488,7 +490,7 @@ Paint supports continuous drag strokes, WordPad and Notepad support drag-to-
 select and selected-text replacement, and the WordPad, Notepad, and File
 Manager scrollbars support direct thumb dragging. The shared gesture input
 path is opt-in, preserving older native applications. See
-[`docs/AURORA-12.md`](docs/AURORA-12.md) for implementation, tests,
+[`docs/AURORA-RELEASES.md#aurora-12`](docs/AURORA-RELEASES.md#aurora-12) for implementation, tests,
 limitations, and manual VM checks. All Aurora editable PNG artwork is retained.
 
 ## Aurora 13 — clipboard, Undo/Redo and keyboard text editing
@@ -497,7 +499,7 @@ Aurora 13 adds a shared bounded clipboard (Ctrl+C/X/V), twelve-state text
 histories with typing coalescing (Ctrl+Z/Y), eight-state Paint stroke history,
 Ctrl+A, Shift+Arrow and Home/End selection, and larger-window Edit toolbars for
 Notepad and WordPad. All three Aurora themes and their PNG masters are retained.
-Details, limits and VM testing checklist: [`docs/AURORA-13.md`](docs/AURORA-13.md).
+Details, limits and VM testing checklist: [`docs/AURORA-RELEASES.md#aurora-13`](docs/AURORA-RELEASES.md#aurora-13).
 
 ## Aurora 14 — File Management & Document Workflows
 
@@ -507,7 +509,7 @@ collision-safe duplicate names. Notepad, WordPad, and Paint share a small
 Aurora-themed Open/Save As picker; target-specific document mailboxes avoid
 cross-editor handoff collisions. Existing read-only filesystem boundaries and
 the executable allowlist remain enforced. For limitations and test commands,
-see [`docs/AURORA-14.md`](docs/AURORA-14.md).
+see [`docs/AURORA-RELEASES.md#aurora-14`](docs/AURORA-RELEASES.md#aurora-14).
 
 
 ## Aurora 17 — expanded writable files and opt-in persistence
@@ -519,5 +521,13 @@ An expanded `OXPDISK2` CRC-journal format allows a fully populated RAMFS to
 be checkpointed on a dedicated 2 MiB IDE data image. Old `OXPDISK1` images
 remain supported with their original smaller capacity; no automatic migration
 or reformat occurs. The default ISO is still RAM-only. Details and tests:
-[`docs/AURORA-17.md`](docs/AURORA-17.md) and
-[`docs/STORAGE.md`](docs/STORAGE.md).
+[`docs/AURORA-RELEASES.md#aurora-17`](docs/AURORA-RELEASES.md#aurora-17) and
+[`docs/FILES-AND-STORAGE.md#storage`](docs/FILES-AND-STORAGE.md#storage).
+
+
+## Repository structure after Aurora 17
+
+Documentation has been consolidated by subsystem. Start with [the docs index](docs/INDEX.md).
+The existing unit/sanitizer Makefile targets still run each original C test separately,
+now selected from seven grouped test sources. This cleanup does not combine
+kernel modules, applications, or editable theme source PNGs.

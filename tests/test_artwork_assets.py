@@ -21,7 +21,14 @@ class ArtworkAssetsTest(unittest.TestCase):
                 width,height,rgba=png_rgba(path)
                 self.assertEqual((width,height),dimensions)
                 self.assertGreater(len(set(rgba[i:i+4] for i in range(0,len(rgba),4))),8)
-        self.assertTrue((ART/'AURORA-ARTWORK-PREVIEW.png').is_file())
+        # Only the host-rendered README screenshot is retained; the
+        # historical contact sheets are not runtime artwork.
+        self.assertTrue((ROOT/'docs/desktop-preview.png').is_file())
+        self.assertIn('![OpenXP desktop preview](docs/desktop-preview.png)',
+                      (ROOT/'README.md').read_text())
+        previews=sorted(p.relative_to(ROOT).as_posix() for p in ROOT.rglob('*.png')
+                        if 'preview' in p.name.lower())
+        self.assertEqual(previews, ['docs/desktop-preview.png'])
     def test_active_inactive_and_states_are_not_identical(self):
         self.assertNotEqual((ART/'frame-active.png').read_bytes(),
                             (ART/'frame-inactive.png').read_bytes())

@@ -191,172 +191,172 @@ smoke-guard:
 
 test-native-games:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_games_test.c -o build/tests/native_games_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_GAMES tests/suite_apps.c -o build/tests/native_games_test
 	build/tests/native_games_test
 
 test-native-games-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_games_test.c -o build/tests/native_games_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_GAMES tests/suite_apps.c -o build/tests/native_games_sanitized
 	build/tests/native_games_sanitized
 
 test-shell-bridge:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel tests/shell_bridge_test.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel -DOPENXP_TEST_SHELL_BRIDGE tests/suite_shell.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_test
 	build/tests/shell_bridge_test
 
 test-shell-bridge-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel tests/shell_bridge_test.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -Ikernel -DOPENXP_TEST_SHELL_BRIDGE tests/suite_shell.c kernel/gui/shell_bridge.c kernel/video/fb.c -o build/tests/shell_bridge_sanitized
 	build/tests/shell_bridge_sanitized
 
 test-capipc:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/capipc_test.c kernel/user/capipc.c -o build/tests/capipc_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_CAPIPC tests/suite_process.c kernel/user/capipc.c -o build/tests/capipc_test
 	build/tests/capipc_test
 
 test-capipc-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/capipc_test.c kernel/user/capipc.c -o build/tests/capipc_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_CAPIPC tests/suite_process.c kernel/user/capipc.c -o build/tests/capipc_sanitized
 	build/tests/capipc_sanitized
 
 test-window-protocol:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/wm_protocol_test.c apps/native/wm_protocol.c -o build/tests/wm_protocol_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_WM_PROTOCOL tests/suite_process.c apps/native/wm_protocol.c -o build/tests/wm_protocol_test
 	build/tests/wm_protocol_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_WM_CAPIPC tests/suite_process.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_test
 	build/tests/wm_capipc_test
 
 test-window-protocol-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/wm_protocol_test.c apps/native/wm_protocol.c -o build/tests/wm_protocol_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_WM_PROTOCOL tests/suite_process.c apps/native/wm_protocol.c -o build/tests/wm_protocol_sanitized
 	build/tests/wm_protocol_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/wm_capipc_test.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_WM_CAPIPC tests/suite_process.c apps/native/wm_protocol.c kernel/user/capipc.c -o build/tests/wm_capipc_sanitized
 	build/tests/wm_capipc_sanitized
 
 test-unit: test-aurora17 test-aurora16 test-aurora15 test-aurora14 test-aurora13 test-advanced-input test-native-pointer test-shell-interaction test-font-fit test-font-engine test-aurora-font-png test-shell-menu-art test-calculator-layout test-aurora-themes test-shell-icons test-ui-atlas test-native-widgets test-native-scene-skin test-skin test-windowd-pic test-native-scroll test-native-text-layout test-native-layout test-wallpaper test-native-scene test-shell-raster test-compositor-integration test-native-games test-shell-bridge test-window-protocol test-desktop test-capipc $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_WAIT tests/suite_apps.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_test
 	build/tests/native_wait_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_VFS tests/suite_filesystem.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_test
 	build/tests/vfs_test $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/app_launch_test.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_APP_LAUNCH tests/suite_process.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_test
 	build/tests/app_launch_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel -DOPENXP_TEST_PCI tests/suite_kernel.c kernel/drivers/pci.c -o build/tests/pci_test
 	build/tests/pci_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_PERSIST tests/suite_filesystem.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_test
 	build/tests/persist_test
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_window_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_WINDOW tests/suite_apps.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_test
 	build/tests/native_window_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/ramfs_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_RAMFS tests/suite_filesystem.c kernel/fs/ramfs.c -o build/tests/ramfs_test
 	build/tests/ramfs_test
 	@mkdir -p build/tests
 	python3 -m unittest discover -s tests -p 'test_*.py'
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_INITRD tests/suite_filesystem.c kernel/fs/initrd.c -o build/tests/initrd_test
 	build/tests/initrd_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/initrd_image_test.c kernel/fs/initrd.c -o build/tests/initrd_image_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_INITRD_IMAGE tests/suite_filesystem.c kernel/fs/initrd.c -o build/tests/initrd_image_test
 	build/tests/initrd_image_test $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_PROCESS_MANAGER tests/suite_process.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_test
 	build/tests/process_manager_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_SYSCALL tests/suite_process.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_test
 	build/tests/syscall_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel -DOPENXP_TEST_PROCESS tests/suite_process.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_test
 	build/tests/process_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/pmm_test.c kernel/mm/pmm.c -o build/tests/pmm_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_PMM tests/suite_kernel.c kernel/mm/pmm.c -o build/tests/pmm_test
 	build/tests/pmm_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/vmm_test.c kernel/mm/vmm.c -o build/tests/vmm_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel -DOPENXP_TEST_VMM tests/suite_kernel.c kernel/mm/vmm.c -o build/tests/vmm_test
 	build/tests/vmm_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/heap_test.c kernel/mm/heap.c -o build/tests/heap_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_HEAP tests/suite_kernel.c kernel/mm/heap.c -o build/tests/heap_test
 	build/tests/heap_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/heap_stress_test.c kernel/mm/heap.c -o build/tests/heap_stress_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_HEAP_STRESS tests/suite_kernel.c kernel/mm/heap.c -o build/tests/heap_stress_test
 	build/tests/heap_stress_test
-	$(HOST_CC) -std=c11 -O2 -g -fno-builtin -Wall -Wextra -Werror tests/string_test.c kernel/lib/string.c -o build/tests/string_test
+	$(HOST_CC) -std=c11 -O2 -g -fno-builtin -Wall -Wextra -Werror -DOPENXP_TEST_STRING tests/suite_kernel.c kernel/lib/string.c -o build/tests/string_test
 	build/tests/string_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/scheduler_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_SCHEDULER tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_test
 	build/tests/scheduler_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/context_switch_test.c kernel/sched/switch.S -o build/tests/context_switch_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_CONTEXT_SWITCH tests/suite_kernel.c kernel/sched/switch.S -o build/tests/context_switch_test
 	build/tests/context_switch_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel tests/timer_test.c kernel/arch/x86_64/timer.c -o build/tests/timer_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel -DOPENXP_TEST_TIMER tests/suite_kernel.c kernel/arch/x86_64/timer.c -o build/tests/timer_test
 	build/tests/timer_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/preempt_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_PREEMPT tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_test
 	build/tests/preempt_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/sleep_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_SLEEP tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_test
 	build/tests/sleep_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/irq_state_test.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_IRQ_STATE tests/suite_kernel.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_test
 	build/tests/irq_state_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/crash_test.c kernel/diag/crash.c -o build/tests/crash_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_CRASH tests/suite_kernel.c kernel/diag/crash.c -o build/tests/crash_test
 	build/tests/crash_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Ikernel -DOPENXP_TEST_SYNC tests/suite_kernel.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_test
 	build/tests/sync_test
 
 test-sanitize: test-aurora17-sanitize test-aurora16-sanitize test-aurora15-sanitize test-aurora14-sanitize test-aurora13-sanitize test-advanced-input-sanitize test-native-pointer-sanitize test-shell-interaction-sanitize test-font-engine-sanitize test-shell-menu-art-sanitize test-calculator-layout-sanitize test-aurora-themes test-shell-icons-sanitize test-ui-atlas test-native-widgets-sanitize test-native-scene-skin-sanitize test-skin-sanitize test-native-scroll-sanitize test-native-text-layout-sanitize test-native-layout-sanitize test-wallpaper-sanitize test-native-scene-sanitize test-shell-raster-sanitize test-compositor-integration-sanitize test-native-games-sanitize test-shell-bridge-sanitize test-window-protocol-sanitize test-desktop-sanitize test-capipc-sanitize $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel tests/native_wait_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_NATIVE_WAIT_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_WAIT tests/suite_apps.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_wait_sanitized
 	build/tests/native_wait_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_VFS tests/suite_filesystem.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/vfs_sanitized
 	build/tests/vfs_sanitized $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/app_launch_test.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_APP_LAUNCH tests/suite_process.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c -o build/tests/app_launch_sanitized
 	build/tests/app_launch_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel tests/pci_test.c kernel/drivers/pci.c -o build/tests/pci_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PCI_HOST_TEST -Ikernel -DOPENXP_TEST_PCI tests/suite_kernel.c kernel/drivers/pci.c -o build/tests/pci_sanitized
 	build/tests/pci_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_PERSIST tests/suite_filesystem.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/persist_sanitized
 	build/tests/persist_sanitized
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_window_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_WINDOW tests/suite_apps.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_window_sanitized
 	build/tests/native_window_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/ramfs_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_RAMFS tests/suite_filesystem.c kernel/fs/ramfs.c -o build/tests/ramfs_sanitized
 	build/tests/ramfs_sanitized
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/initrd_test.c kernel/fs/initrd.c -o build/tests/initrd_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_INITRD tests/suite_filesystem.c kernel/fs/initrd.c -o build/tests/initrd_sanitized
 	build/tests/initrd_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel tests/process_manager_test.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PROCESS_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -Ikernel -DOPENXP_TEST_PROCESS_MANAGER tests/suite_process.c kernel/user/process.c kernel/user/capipc.c -o build/tests/process_manager_sanitized
 	build/tests/process_manager_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/syscall_test.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -DOPENXP_CAPIPC_HOST_TEST -DOPENXP_SHELL_HOST_TEST -DOPENXP_IRQ_HOST_TEST -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_SYSCALL tests/suite_process.c kernel/user/syscall.c kernel/user/app_launch.c kernel/arch/x86_64/irq_state.c kernel/user/capipc.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/video/fb.c kernel/fs/ramfs.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/persist.c -o build/tests/syscall_sanitized
 	build/tests/syscall_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/process_test.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel -DOPENXP_TEST_PROCESS tests/suite_process.c kernel/mm/vmm.c kernel/mm/address_space.c kernel/user/elf.c -o build/tests/process_sanitized
 	build/tests/process_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/pmm_test.c kernel/mm/pmm.c -o build/tests/pmm_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_PMM tests/suite_kernel.c kernel/mm/pmm.c -o build/tests/pmm_sanitized
 	build/tests/pmm_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel tests/vmm_test.c kernel/mm/vmm.c -o build/tests/vmm_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_VMM_HOST_TEST -Ikernel -DOPENXP_TEST_VMM tests/suite_kernel.c kernel/mm/vmm.c -o build/tests/vmm_sanitized
 	build/tests/vmm_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/heap_test.c kernel/mm/heap.c -o build/tests/heap_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_HEAP tests/suite_kernel.c kernel/mm/heap.c -o build/tests/heap_sanitized
 	build/tests/heap_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/heap_stress_test.c kernel/mm/heap.c -o build/tests/heap_stress_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_HEAP_STRESS tests/suite_kernel.c kernel/mm/heap.c -o build/tests/heap_stress_sanitized
 	build/tests/heap_stress_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fno-builtin -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/string_test.c kernel/lib/string.c -o build/tests/string_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fno-builtin -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_STRING tests/suite_kernel.c kernel/lib/string.c -o build/tests/string_sanitized
 	build/tests/string_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/scheduler_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_SCHEDULER tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/scheduler_sanitized
 	build/tests/scheduler_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel tests/timer_test.c kernel/arch/x86_64/timer.c -o build/tests/timer_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TIMER_HOST_TEST -Ikernel -DOPENXP_TEST_TIMER tests/suite_kernel.c kernel/arch/x86_64/timer.c -o build/tests/timer_sanitized
 	build/tests/timer_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/preempt_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_PREEMPT tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/preempt_sanitized
 	build/tests/preempt_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel tests/sleep_test.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SCHED_HOST_TEST -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_SLEEP tests/suite_kernel.c kernel/sched/scheduler.c kernel/arch/x86_64/irq_state.c -o build/tests/sleep_sanitized
 	build/tests/sleep_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel tests/irq_state_test.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_IRQ_HOST_TEST -Ikernel -DOPENXP_TEST_IRQ_STATE tests/suite_kernel.c kernel/arch/x86_64/irq_state.c -o build/tests/irq_state_sanitized
 	build/tests/irq_state_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/crash_test.c kernel/diag/crash.c -o build/tests/crash_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_CRASH tests/suite_kernel.c kernel/diag/crash.c -o build/tests/crash_sanitized
 	build/tests/crash_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -pthread -Ikernel tests/sync_test.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -pthread -Ikernel -DOPENXP_TEST_SYNC tests/suite_kernel.c kernel/sync/wait_queue.c kernel/sync/event.c kernel/sync/mutex.c kernel/sync/ipc.c -o build/tests/sync_sanitized
 	build/tests/sync_sanitized
 test-desktop:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/shell_test.c kernel/shell/shell.c -o build/tests/shell_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_SHELL tests/suite_shell.c kernel/shell/shell.c -o build/tests/shell_test
 	build/tests/shell_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/fb_test.c kernel/video/fb.c -o build/tests/fb_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_FB tests/suite_graphics.c kernel/video/fb.c -o build/tests/fb_test
 	build/tests/fb_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel -DOPENXP_TEST_INPUT tests/suite_kernel.c kernel/input/input.c -o build/tests/input_test
 	build/tests/input_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_DESKTOP tests/suite_shell.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_test
 	build/tests/desktop_test
 
 test-desktop-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/shell_test.c kernel/shell/shell.c -o build/tests/shell_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_SHELL tests/suite_shell.c kernel/shell/shell.c -o build/tests/shell_sanitized
 	build/tests/shell_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/fb_test.c kernel/video/fb.c -o build/tests/fb_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_FB tests/suite_graphics.c kernel/video/fb.c -o build/tests/fb_sanitized
 	build/tests/fb_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel tests/input_test.c kernel/input/input.c -o build/tests/input_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_INPUT_HOST_TEST -Ikernel -DOPENXP_TEST_INPUT tests/suite_kernel.c kernel/input/input.c -o build/tests/input_sanitized
 	build/tests/input_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_DESKTOP tests/suite_shell.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o build/tests/desktop_sanitized
 	build/tests/desktop_sanitized
 
 clean:
@@ -366,29 +366,29 @@ clean:
 # Native source codec test (no guest needed).
 test-native-paint:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror tests/native_paint_codec_test.c -o build/tests/native_paint_codec_test
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_PAINT_CODEC tests/suite_aurora.c -o build/tests/native_paint_codec_test
 	build/tests/native_paint_codec_test
 
 .PHONY: test-native-edit
 test-native-edit:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror tests/native_text_edit_test.c -o build/tests/native_text_edit_test
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_TEXT_EDIT tests/suite_aurora.c -o build/tests/native_text_edit_test
 	build/tests/native_text_edit_test
 
 .PHONY: test-native-theme
 test-native-theme:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror tests/native_theme_test.c -o build/tests/native_theme_test
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_THEME tests/suite_graphics.c -o build/tests/native_theme_test
 	build/tests/native_theme_test
 
 .PHONY: test-native-sanitize
 test-native-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_paint_codec_test.c -o build/tests/native_paint_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_PAINT_CODEC tests/suite_aurora.c -o build/tests/native_paint_sanitized
 	build/tests/native_paint_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_text_edit_test.c -o build/tests/native_text_edit_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_TEXT_EDIT tests/suite_aurora.c -o build/tests/native_text_edit_sanitized
 	build/tests/native_text_edit_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_theme_test.c -o build/tests/native_theme_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_THEME tests/suite_graphics.c -o build/tests/native_theme_sanitized
 	build/tests/native_theme_sanitized
 
 # Pixel-level integration through the actual desktop renderer, not only a
@@ -396,31 +396,31 @@ test-native-sanitize:
 .PHONY: test-compositor-integration test-compositor-integration-sanitize
 test-compositor-integration:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/compositor_integration_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_COMPOSITOR_INTEGRATION tests/suite_graphics.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_test
 	$(BUILD)/tests/compositor_integration_test
 test-compositor-integration-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/compositor_integration_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_SHELL_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_COMPOSITOR_INTEGRATION tests/suite_graphics.c kernel/gui/desktop.c kernel/gui/native.c kernel/gui/shell_bridge.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/compositor_integration_sanitized
 	$(BUILD)/tests/compositor_integration_sanitized
 
 .PHONY: test-shell-raster test-shell-raster-sanitize
 test-shell-raster:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_raster_test.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_RASTER tests/suite_graphics.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_test
 	$(BUILD)/tests/shell_raster_test
 test-shell-raster-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_raster_test.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_RASTER tests/suite_graphics.c apps/native/shell_raster.c -o $(BUILD)/tests/shell_raster_sanitized
 	$(BUILD)/tests/shell_raster_sanitized
 
 .PHONY: test-native-scene test-native-scene-sanitize
 test-native-scene:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCENE tests/suite_graphics.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_test
 	$(BUILD)/tests/native_scene_test
 test-native-scene-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCENE tests/suite_graphics.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_sanitized
 	$(BUILD)/tests/native_scene_sanitized
 
 # Regression: incremental desktop regions must exactly match a full composed
@@ -428,41 +428,41 @@ test-native-scene-sanitize:
 .PHONY: test-present test-present-sanitize
 test-present:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_present_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_DESKTOP_PRESENT tests/suite_shell.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_test
 	$(BUILD)/tests/desktop_present_test
 test-present-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/desktop_present_test.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_WM_HOST_TEST -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_DESKTOP_PRESENT tests/suite_shell.c kernel/gui/desktop.c kernel/gui/native.c kernel/shell/shell.c kernel/video/fb.c kernel/fs/ramfs.c -o $(BUILD)/tests/desktop_present_sanitized
 	$(BUILD)/tests/desktop_present_sanitized
 
 .PHONY: test-wallpaper test-wallpaper-sanitize
 test-wallpaper:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror tests/wallpaper_test.c apps/native/wallpaper.c -o build/tests/wallpaper_test
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -DOPENXP_TEST_WALLPAPER tests/suite_graphics.c apps/native/wallpaper.c -o build/tests/wallpaper_test
 	build/tests/wallpaper_test
 test-wallpaper-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/wallpaper_test.c apps/native/wallpaper.c -o build/tests/wallpaper_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_WALLPAPER tests/suite_graphics.c apps/native/wallpaper.c -o build/tests/wallpaper_sanitized
 	build/tests/wallpaper_sanitized
 
 .PHONY: test-native-layout test-native-layout-sanitize
 test-native-layout:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_layout_test.c -o $(BUILD)/tests/native_layout_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/native_layout_test
 	$(BUILD)/tests/native_layout_test
 test-native-layout-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_layout_test.c -o $(BUILD)/tests/native_layout_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/native_layout_sanitized
 	$(BUILD)/tests/native_layout_sanitized
 
 .PHONY: test-native-text-layout test-native-text-layout-sanitize
 test-native-text-layout:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_text_layout_test.c -o $(BUILD)/tests/native_text_layout_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_TEXT_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/native_text_layout_test
 	$(BUILD)/tests/native_text_layout_test
 test-native-text-layout-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_text_layout_test.c -o $(BUILD)/tests/native_text_layout_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_TEXT_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/native_text_layout_sanitized
 	$(BUILD)/tests/native_text_layout_sanitized
 
 .PHONY: test-windowd-pic
@@ -472,51 +472,51 @@ test-windowd-pic:
 .PHONY: test-native-scroll test-native-scroll-sanitize
 test-native-scroll:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scroll_test.c -o $(BUILD)/tests/native_scroll_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCROLL tests/suite_apps.c -o $(BUILD)/tests/native_scroll_test
 	$(BUILD)/tests/native_scroll_test
 test-native-scroll-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scroll_test.c -o $(BUILD)/tests/native_scroll_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCROLL tests/suite_apps.c -o $(BUILD)/tests/native_scroll_sanitized
 	$(BUILD)/tests/native_scroll_sanitized
 
 .PHONY: test-skin test-skin-sanitize
 test-skin: $(BUILD)/skin/aurora.oxs
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/skin_test.c apps/native/skin.c -o $(BUILD)/tests/skin_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_SKIN tests/suite_graphics.c apps/native/skin.c -o $(BUILD)/tests/skin_test
 	$(BUILD)/tests/skin_test $(BUILD)/skin/aurora.oxs
 test-skin-sanitize: $(BUILD)/skin/aurora.oxs
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/skin_test.c apps/native/skin.c -o $(BUILD)/tests/skin_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_SKIN tests/suite_graphics.c apps/native/skin.c -o $(BUILD)/tests/skin_sanitized
 	$(BUILD)/tests/skin_sanitized $(BUILD)/skin/aurora.oxs
 
 .PHONY: test-native-scene-skin test-native-scene-skin-sanitize
 test-native-scene-skin: $(BUILD)/skin/aurora.oxs
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_scene_skin_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCENE_SKIN tests/suite_graphics.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_test
 	$(BUILD)/tests/native_scene_skin_test $(BUILD)/skin/aurora.oxs
 test-native-scene-skin-sanitize: $(BUILD)/skin/aurora.oxs
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_scene_skin_test.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_SCENE_SKIN tests/suite_graphics.c apps/native/native_scene.c apps/native/shell_raster.c apps/native/skin.c -o $(BUILD)/tests/native_scene_skin_sanitized
 	$(BUILD)/tests/native_scene_skin_sanitized $(BUILD)/skin/aurora.oxs
 
 .PHONY: test-calculator-layout test-calculator-layout-sanitize
 test-calculator-layout:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/calculator_layout_test.c -o $(BUILD)/tests/calculator_layout_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_CALCULATOR_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/calculator_layout_test
 	$(BUILD)/tests/calculator_layout_test
 test-calculator-layout-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/calculator_layout_test.c -o $(BUILD)/tests/calculator_layout_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_CALCULATOR_LAYOUT tests/suite_apps.c -o $(BUILD)/tests/calculator_layout_sanitized
 	$(BUILD)/tests/calculator_layout_sanitized
 
 .PHONY: test-native-widgets test-native-widgets-sanitize
 test-native-widgets:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_widgets_test.c -o $(BUILD)/tests/native_widgets_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_WIDGETS tests/suite_apps.c -o $(BUILD)/tests/native_widgets_test
 	$(BUILD)/tests/native_widgets_test
 test-native-widgets-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_widgets_test.c -o $(BUILD)/tests/native_widgets_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_WIDGETS tests/suite_apps.c -o $(BUILD)/tests/native_widgets_sanitized
 	$(BUILD)/tests/native_widgets_sanitized
 
 .PHONY: test-ui-atlas
@@ -527,21 +527,21 @@ test-ui-atlas: $(BUILD)/skin/aurora-widgets.oxua $(BUILD)/skin/aurora-icons.oxua
 .PHONY: test-shell-menu-art test-shell-menu-art-sanitize
 test-shell-menu-art: $(BUILD)/skin/aurora-menu.oxua
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_menu_art_test.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_MENU_ART tests/suite_graphics.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_test
 	$(BUILD)/tests/shell_menu_art_test $(BUILD)/skin/aurora-menu.oxua
 test-shell-menu-art-sanitize: $(BUILD)/skin/aurora-menu.oxua
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_menu_art_test.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_MENU_ART tests/suite_graphics.c apps/native/shell_menu_art.c -o $(BUILD)/tests/shell_menu_art_sanitized
 	$(BUILD)/tests/shell_menu_art_sanitized $(BUILD)/skin/aurora-menu.oxua
 .PHONY: test-shell-icons test-shell-icons-sanitize
 # Pure tests run without a VM, using the exact native-format atlas parser.
 test-shell-icons:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_icons_test.c apps/native/shell_icons.c -o build/tests/shell_icons_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_ICONS tests/suite_graphics.c apps/native/shell_icons.c -o build/tests/shell_icons_test
 	build/tests/shell_icons_test
 test-shell-icons-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_icons_test.c apps/native/shell_icons.c -o build/tests/shell_icons_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_ICONS tests/suite_graphics.c apps/native/shell_icons.c -o build/tests/shell_icons_sanitized
 	build/tests/shell_icons_sanitized
 
 .PHONY: test-aurora-themes
@@ -550,14 +550,14 @@ test-aurora-themes: $(BUILD)/initrd.img $(BUILD)/skin/aurora.oxs $(BUILD)/skin/o
 
 # Aurora 8 font loading and proportional glyph tests.
 .PHONY: test-font-engine test-font-engine-sanitize
-$(BUILD)/tests/font_engine_test: tests/font_engine_test.c apps/native/font_engine.h apps/native/shell_raster.c
+$(BUILD)/tests/font_engine_test: tests/suite_graphics.c apps/native/font_engine.h apps/native/shell_raster.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/font_engine_test.c apps/native/shell_raster.c -o $@
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_FONT_ENGINE tests/suite_graphics.c apps/native/shell_raster.c -o $@
 test-font-engine: $(BUILD)/skin/aurora-font.oxft $(BUILD)/tests/font_engine_test
 	$(BUILD)/tests/font_engine_test $(BUILD)/skin/aurora-font.oxft
 test-font-engine-sanitize: $(BUILD)/skin/aurora-font.oxft
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/font_engine_test.c apps/native/shell_raster.c -o $(BUILD)/tests/font_engine_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_FONT_ENGINE tests/suite_graphics.c apps/native/shell_raster.c -o $(BUILD)/tests/font_engine_sanitized
 	$(BUILD)/tests/font_engine_sanitized $(BUILD)/skin/aurora-font.oxft
 
 .PHONY: test-aurora-font-png
@@ -568,62 +568,62 @@ test-aurora-font-png: $(BUILD)/skin/aurora-font.oxft
 .PHONY: test-font-fit test-font-fit-sanitize
 test-font-fit:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/font_fit_test.c -o $(BUILD)/tests/font_fit_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_FONT_FIT tests/suite_graphics.c -o $(BUILD)/tests/font_fit_test
 	$(BUILD)/tests/font_fit_test
 
 test-font-fit-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/font_fit_test.c -o $(BUILD)/tests/font_fit_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_FONT_FIT tests/suite_graphics.c -o $(BUILD)/tests/font_fit_sanitized
 	$(BUILD)/tests/font_fit_sanitized
 
 # Aurora 10 release-action regression: cancel when pointer leaves an item.
 .PHONY: test-shell-interaction test-shell-interaction-sanitize
 test-shell-interaction:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/shell_interaction_test.c -o $(BUILD)/tests/shell_interaction_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_INTERACTION tests/suite_shell.c -o $(BUILD)/tests/shell_interaction_test
 	$(BUILD)/tests/shell_interaction_test
 
 test-shell-interaction-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/shell_interaction_test.c -o $(BUILD)/tests/shell_interaction_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_SHELL_INTERACTION tests/suite_shell.c -o $(BUILD)/tests/shell_interaction_sanitized
 	$(BUILD)/tests/shell_interaction_sanitized
 
 # Aurora 11 native pointer ABI and gesture state machine (host + ASan/UBSan).
 .PHONY: test-native-pointer test-native-pointer-sanitize
 test-native-pointer:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/native_pointer_test.c -o build/tests/native_pointer_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_POINTER tests/suite_aurora.c -o build/tests/native_pointer_test
 	build/tests/native_pointer_test
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_pointer_kernel_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_POINTER_KERNEL tests/suite_aurora.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_test
 	build/tests/native_pointer_kernel_test
 
 test-native-pointer-sanitize:
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/native_pointer_test.c -o build/tests/native_pointer_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_NATIVE_POINTER tests/suite_aurora.c -o build/tests/native_pointer_sanitized
 	build/tests/native_pointer_sanitized
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel tests/native_pointer_kernel_test.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_NATIVE_HOST_TEST -Ikernel -DOPENXP_TEST_NATIVE_POINTER_KERNEL tests/suite_aurora.c kernel/gui/native.c kernel/video/fb.c -o build/tests/native_pointer_kernel_sanitized
 	build/tests/native_pointer_kernel_sanitized
 
 # Aurora 12: pure gesture, continuous stroke, selection and thumb math.
 .PHONY: test-advanced-input test-advanced-input-sanitize
 test-advanced-input:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror tests/advanced_input_test.c -o $(BUILD)/tests/advanced_input_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_TEST_ADVANCED_INPUT tests/suite_aurora.c -o $(BUILD)/tests/advanced_input_test
 	$(BUILD)/tests/advanced_input_test
 test-advanced-input-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror tests/advanced_input_test.c -o $(BUILD)/tests/advanced_input_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_TEST_ADVANCED_INPUT tests/suite_aurora.c -o $(BUILD)/tests/advanced_input_sanitized
 	$(BUILD)/tests/advanced_input_sanitized
 
 # Aurora 13: bounded, cross-application clipboard + editing regression suite.
 .PHONY: test-aurora13 test-aurora13-sanitize
 test-aurora13:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora13_edit_test.c -o $(BUILD)/tests/aurora13_edit_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA13_EDIT tests/suite_aurora.c -o $(BUILD)/tests/aurora13_edit_test
 	$(BUILD)/tests/aurora13_edit_test
 test-aurora13-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora13_edit_test.c -o $(BUILD)/tests/aurora13_edit_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA13_EDIT tests/suite_aurora.c -o $(BUILD)/tests/aurora13_edit_sanitized
 	$(BUILD)/tests/aurora13_edit_sanitized
 
 # Aurora 14: document associations, tagged clipboard, double-click and
@@ -631,34 +631,34 @@ test-aurora13-sanitize:
 .PHONY: test-aurora14 test-aurora14-sanitize
 test-aurora14:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora14_workflow_test.c -o $(BUILD)/tests/aurora14_workflow_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA14_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora14_workflow_test
 	$(BUILD)/tests/aurora14_workflow_test
 test-aurora14-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora14_workflow_test.c -o $(BUILD)/tests/aurora14_workflow_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA14_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora14_workflow_sanitized
 	$(BUILD)/tests/aurora14_workflow_sanitized
 
 # Aurora 15: per-launch data arguments, picker focus, drag/drop and storage
 .PHONY: test-aurora15 test-aurora15-sanitize
 test-aurora15:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora15_workflow_test.c -o $(BUILD)/tests/aurora15_workflow_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA15_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora15_workflow_test
 	$(BUILD)/tests/aurora15_workflow_test
 
 test-aurora15-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora15_workflow_test.c -o $(BUILD)/tests/aurora15_workflow_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA15_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora15_workflow_sanitized
 	$(BUILD)/tests/aurora15_workflow_sanitized
 
 # Aurora 16: nested-folder file destinations, editor drag targets and IPC ABI.
 .PHONY: test-aurora16 test-aurora16-sanitize
 test-aurora16:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/aurora16_workflow_test.c -o $(BUILD)/tests/aurora16_workflow_test
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA16_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora16_workflow_test
 	$(BUILD)/tests/aurora16_workflow_test
 test-aurora16-sanitize:
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/aurora16_workflow_test.c -o $(BUILD)/tests/aurora16_workflow_sanitized
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_AURORA16_WORKFLOW tests/suite_aurora.c -o $(BUILD)/tests/aurora16_workflow_sanitized
 	$(BUILD)/tests/aurora16_workflow_sanitized
 
 # Aurora 17: increased RAMFS quota, transactional subtree changes, v1/v2
@@ -666,19 +666,19 @@ test-aurora16-sanitize:
 .PHONY: test-aurora17 test-aurora17-sanitize
 test-aurora17: $(BUILD)/initrd.img
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_RAMFS tests/suite_filesystem.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs
 	build/tests/aurora17_ramfs
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_VFS tests/suite_filesystem.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs
 	build/tests/aurora17_vfs $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_PERSIST tests/suite_filesystem.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist
 	build/tests/aurora17_persist
 	python3 -m unittest tests/test_storage_format.py
 
 test-aurora17-sanitize: $(BUILD)/initrd.img
 	@mkdir -p build/tests
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/ramfs_test.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs_san
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_RAMFS tests/suite_filesystem.c kernel/fs/ramfs.c -o build/tests/aurora17_ramfs_san
 	build/tests/aurora17_ramfs_san
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel tests/vfs_test.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs_san
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ikernel -DOPENXP_TEST_VFS tests/suite_filesystem.c kernel/fs/vfs.c kernel/fs/initrd.c kernel/fs/ramfs.c -o build/tests/aurora17_vfs_san
 	build/tests/aurora17_vfs_san $(BUILD)/initrd.img
-	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel tests/persist_test.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist_san
+	$(HOST_CC) -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -DOPENXP_PERSIST_HOST_TEST -Ikernel -DOPENXP_TEST_PERSIST tests/suite_filesystem.c kernel/fs/persist.c kernel/fs/ramfs.c -o build/tests/aurora17_persist_san
 	build/tests/aurora17_persist_san

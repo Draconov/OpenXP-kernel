@@ -1,7 +1,8 @@
 # Aurora artwork: original source PNGs INCLUDED
 
-**Start with `aurora/AURORA-ARTWORK-PREVIEW.png`.** It is a design mockup
-assembled from original Aurora art, not a screenshot of the running OS.
+**The single repository preview is [`docs/desktop-preview.png`](../../docs/desktop-preview.png).**
+It is host-rendered, not a screenshot from a running VM. Theme sprites remain editable
+under `assets/ui/aurora/`; historical contact sheets were removed.
 
 All editable PNG source files are under `assets/ui/aurora/`, in **both** the
 updated-files and full-source ZIP archives:
@@ -14,7 +15,6 @@ updated-files and full-source ZIP archives:
 | Start button | `start.png` | 120x40 | **Yes**, 9-slice |
 | Reusable bitmap control artwork | `widgets-atlas.png` | 192x128 | **Yes**, native widget atlas |
 | Explorer/application icon art | `icons-32.png` | 192x64 | **Yes**, File Manager + desktop + Start + taskbar |
-| Full-scale visual concept sheet | `AURORA-ARTWORK-PREVIEW.png` | 1240x800 | Preview only |
 
 Runtime sprites load via `windows/resources/aurora.oxs` in the initrd. Build-time
 packing uses **only** Python's standard library. UI design is original and
@@ -27,12 +27,12 @@ GIMP, Krita, or Aseprite. The build does not call the authoring script, so
 manual changes are preserved. The standard `make kernel` workflow repacks
 and embeds the five window sprites plus the two OXUA atlases automatically.
 
-See `docs/SKIN-ENGINE.md` and `docs/AURORA-WIDGETS.md`.
+See `docs/THEMING.md#skin-engine` and `docs/THEMING.md#aurora-widgets`.
 
-Aurora 4 also includes `AURORA-4-ARTWORK-PREVIEW.png` at the repository root.
+Aurora 4 icon source art is preserved in `assets/ui/aurora/icons-32.png`.
 
 ## Aurora 6: editable application chrome
 
 The three theme folders each include a 192×64 `chrome-strip.png`.
 It is loaded by native widgets for application headers, toolbars and status bars;
-see `docs/AURORA-6.md` for safe editing and 9-slice margins.
+see `docs/AURORA-RELEASES.md#aurora-6` for safe editing and 9-slice margins.

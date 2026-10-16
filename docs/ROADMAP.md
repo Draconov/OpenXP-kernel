@@ -344,7 +344,7 @@ it is **not** a claim that the entire operating system is finished.
       feature parity for all application controllers; only then retire the
       kernel-hosted implementations, individually after VM regression tests.
 
-See [the compositor boundary](COMPOSITOR.md) for the protocol and release gate.
+See [the compositor boundary](CORE-ENGINEERING.md#compositor) for the protocol and release gate.
 
 ### Native window rasterization checkpoint
 
