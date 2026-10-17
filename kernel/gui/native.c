@@ -315,28 +315,46 @@ bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count) {
             c->w > NATIVE_SURFACE_W-c->x || c->h > NATIVE_SURFACE_H-c->y)
             return false;
     }
-    uint64_t flags=lock_irq();
-    int slot=find_owner(pid);
-    if (slot<0) { unlock_irq(flags); return false; }
-    for (size_t i=0; i<count; ++i) {
+    /* Expensive CLEAR/FILL commands can touch 230K pixels. Keep IRQ-off
+     * windows bounded to eight scanlines while retaining command order.
+     * Only publish a new content generation after the entire batch ends. */
+    for(size_t i=0;i<count;++i){
         const native_draw_cmd_t *c=&cmds[i];
         uint16_t color=rgb565(c->color);
-        uint32_t x=0,y=0,w=NATIVE_SURFACE_W,h=NATIVE_SURFACE_H;
-        if (c->op == NATIVE_DRAW_GLYPH) {
+        if(c->op==NATIVE_DRAW_GLYPH){
+            uint64_t flags=lock_irq();
+            int slot=find_owner(pid);
+            if(slot<0){unlock_irq(flags);return false;}
             const uint8_t *bits=fb_glyph5x7((char)c->w);
             for(unsigned row=0;row<7;++row)for(unsigned col=0;col<5;++col){
                 if(!(bits[row]&(1u<<(4u-col))))continue;
                 for(unsigned dy=0;dy<c->h;++dy)for(unsigned dx=0;dx<c->h;++dx)
-                    pixels[slot][(c->y+row*c->h+dy)*NATIVE_SURFACE_W +
+                    pixels[slot][(c->y+row*c->h+dy)*NATIVE_SURFACE_W+
                                  c->x+col*c->h+dx]=color;
             }
+            unlock_irq(flags);
             continue;
         }
-        if (c->op == NATIVE_DRAW_FILL) { x=c->x;y=c->y;w=c->w;h=c->h; }
-        for (uint32_t row=y;row<y+h;++row)
-            for (uint32_t col=x;col<x+w;++col)
-                pixels[slot][row*NATIVE_SURFACE_W+col]=color;
+        uint32_t x=c->op==NATIVE_DRAW_FILL?c->x:0u;
+        uint32_t y=c->op==NATIVE_DRAW_FILL?c->y:0u;
+        uint32_t w=c->op==NATIVE_DRAW_FILL?c->w:NATIVE_SURFACE_W;
+        uint32_t h=c->op==NATIVE_DRAW_FILL?c->h:NATIVE_SURFACE_H;
+        for(uint32_t sy=y;sy<y+h;){
+            uint32_t end=sy+8u;
+            if(end>y+h)end=y+h;
+            uint64_t flags=lock_irq();
+            int slot=find_owner(pid);
+            if(slot<0){unlock_irq(flags);return false;}
+            for(uint32_t yy=sy;yy<end;++yy)
+                for(uint32_t xx=x;xx<x+w;++xx)
+                    pixels[slot][yy*NATIVE_SURFACE_W+xx]=color;
+            unlock_irq(flags);
+            sy=end;
+        }
     }
+    uint64_t flags=lock_irq();
+    int slot=find_owner(pid);
+    if(slot<0){unlock_irq(flags);return false;}
     painted[slot]=true;
     windows[slot].surface_w=windows[slot].canvas_w;
     windows[slot].surface_h=windows[slot].canvas_h;

@@ -499,6 +499,29 @@ static void test_reuse_and_limits(void) {
     assert(capipc_connect(100,&unused)==CAPIPC_CLOSED);
     assert(capipc_grant_server(101));
 }
+/* Six occupied client connections must not make Settings unable to open
+ * a fresh control-plane IPC connection to the desktop service. */
+static void test_theme_control_capacity(void){
+    capipc_init();assert(capipc_grant_server(99));assert(capipc_listen(99)==CAPIPC_OK);
+    uint64_t clients[6],servers[6];
+    for(unsigned i=0;i<6u;++i){
+        assert(capipc_connect(200u+i,&clients[i])==CAPIPC_OK);
+        assert(capipc_accept(99,&servers[i])==CAPIPC_OK);
+    }
+    uint64_t control=0,accepted=0;
+    assert(capipc_connect(222,&control)==CAPIPC_OK);
+    assert(capipc_accept(99,&accepted)==CAPIPC_OK);
+    assert(capipc_send(222,control,"T",1u)==CAPIPC_OK);
+    char reply[2]={0};size_t got=0;
+    assert(capipc_receive(99,accepted,reply,sizeof(reply),&got)==CAPIPC_OK);
+    assert(got==1u && reply[0]=='T');
+    assert(capipc_close(99,accepted)==CAPIPC_OK);
+    assert(capipc_close(222,control)==CAPIPC_OK);
+    for(unsigned i=0;i<6u;++i){
+        assert(capipc_close(99,servers[i])==CAPIPC_OK);
+        assert(capipc_close(200u+i,clients[i])==CAPIPC_OK);
+    }
+}
 static void test_client_quota(void) {
     capipc_init();assert(capipc_grant_server(7));assert(capipc_listen(7)==CAPIPC_OK);
     uint64_t a=0,b=0,c=0;
@@ -547,7 +570,7 @@ static void test_overflow_and_exit(void){
     assert(capipc_receive(50,server,payload,sizeof(payload),&n)==CAPIPC_CLOSED);
     assert(capipc_close(50,server)==CAPIPC_OK);
 }
-int main(void){test_exchange();test_reuse_and_limits();test_overflow_and_exit();test_client_quota();test_server_wait_any();puts("capipc_test: passed");return 0;}
+int main(void){test_exchange();test_reuse_and_limits();test_overflow_and_exit();test_client_quota();test_theme_control_capacity();test_server_wait_any();puts("capipc_test: passed");return 0;}
 #elif defined(OPENXP_TEST_SYSCALL)
 #include "user/syscall.h"
 #include "user/shell_abi.h"

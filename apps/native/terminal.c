@@ -164,27 +164,83 @@ static void execute(void){
     }else if(used)print("UNKNOWN COMMAND. TRY HELP");
     input[0]=0;used=0;
 }
+/* Terminal deliberately uses a very small batched raster path. Rendering a
+ * bitmap toolbar plus separate per-label calls on *every typed character*
+ * caused dozens of syscalls and huge intermediate native generations. One
+ * bounded batch of glyph commands preserves the classic console appearance. */
+static oxp_draw_cmd_t draw_batch[32];
+static unsigned draw_used;
+static void flush_draw(void){
+    if(draw_used){(void)oxp_draw(draw_batch,draw_used);draw_used=0;}
+}
+static void append_draw(uint32_t op,unsigned x,unsigned y,unsigned w,unsigned h,uint32_t color){
+    if(draw_used==32u)flush_draw();
+    draw_batch[draw_used++]=(oxp_draw_cmd_t){op,x,y,w,h,color};
+}
+static void append_text(unsigned x,unsigned y,const char *text,uint32_t color,unsigned width){
+    for(;*text && x+5u<=width; ++text,x+=6u){
+        if(*text>=32 && *text<=126 && *text!=' ')
+            append_draw(OXP_DRAW_GLYPH,x,y,(uint32_t)(unsigned char)*text,1u,color);
+    }
+}
 static void render(void){
     unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
-    oxp_draw_cmd_t shapes[]={
-        {OXP_DRAW_CLEAR,0,0,0,0,0x101d30},{OXP_DRAW_FILL,0,0,w,22,0x264c7d}};
-    oxp_draw(shapes,2);oxp_ui_appbar(w,"TERMINAL");
+    if(w<32u||h<30u)return;
+    unsigned theme=oxp_ui_theme;
+    uint32_t header=oxp_theme_toolbar(theme),edge=oxp_theme_accent(theme);
+    draw_used=0;
+    append_draw(OXP_DRAW_CLEAR,0,0,0,0,0x101d30u);
+    append_draw(OXP_DRAW_FILL,0,0,w,25u,header);
+    append_draw(OXP_DRAW_FILL,0,24u,w,1u,edge);
+    append_text(10u,9u,"TERMINAL",0xffffffu,w);
     unsigned prompt=h>18u?h-18u:0u;
     unsigned rows=prompt>30u?(prompt-30u)/17u:0u;
     if(rows>7u)rows=7u;
     unsigned count=row<rows?row:rows;
-    for(unsigned i=0;i<count;++i)oxp_label(9,30+i*17,lines[(row-count+i)%7],1,0xaddbb3);
-    if(h>15u){oxp_fill(0,prompt>5u?prompt-5u:0u,w,1u,oxp_theme_accent(oxp_ui_theme));
-        oxp_label(9,prompt,">",1,0x82e7b3);oxp_label(20,prompt,input,1,0xd6f4db);}
+    for(unsigned i=0;i<count;++i)
+        append_text(9u,30u+i*17u,lines[(row-count+i)%7],0xaddbb3u,w);
+    if(h>15u){
+        append_draw(OXP_DRAW_FILL,0,prompt>5u?prompt-5u:0u,w,1u,edge);
+        append_text(9u,prompt,">",0x82e7b3u,w);
+        append_text(20u,prompt,input,0xd6f4dbu,w);
+    }
+    flush_draw();
+}
+/* Terminal input is append-only. Paint only the newly changed character
+ * cell; command output, resize and theme changes still redraw the frame. */
+static void render_input_cell(unsigned index){
+    unsigned w=oxp_canvas_width(),h=oxp_canvas_height();
+    if(w<32u || h<30u)return;
+    unsigned x=20u+index*6u;
+    unsigned y=h-18u;
+    if(x+6u>w || y+8u>h)return; /* clipped input is still retained */
+    oxp_draw_cmd_t cmd[2]={
+        {OXP_DRAW_FILL,x,y,6u,8u,0x101d30u},
+        {OXP_DRAW_GLYPH,x,y,(uint32_t)(unsigned char)input[index],1u,0xd6f4dbu}
+    };
+    (void)oxp_draw(cmd,input[index] && input[index]!=' '?2u:1u);
 }
 void oxp_main(void){
     if(oxp_open("Terminal - native ELF64"))oxp_exit(1);
-    oxp_ui_atlas_init_widgets();
+    /* No heavyweight bitmap-atlas reload in the foreground input loop. */
+    oxp_ui_theme=oxp_ui_preferred_theme();
     print("TYPE HELP FOR COMMANDS");
-    for(;;){render();uint32_t e=oxp_ui_wait_theme();
+    int dirty=1;
+    for(;;){
+        if(dirty){render();dirty=0;}
+        uint32_t e=oxp_wait(25u);
+        if(!e){
+            unsigned theme=oxp_ui_preferred_theme();
+            if(theme!=oxp_ui_theme){oxp_ui_theme=theme;dirty=1;}
+            continue;
+        }
         if(e==OXP_CLOSE||e==27)break;
-        if(e==10){execute();continue;}
-        if(e==8){if(used)input[--used]=0;continue;}
-        if(e>=32&&e<127&&used+1<sizeof input){input[used++]=(char)e;input[used]=0;}
+        if(e==OXP_RESIZE){dirty=1;continue;}
+        if(e==10){execute();dirty=1;continue;}
+        if(e==8){if(used){input[--used]=0;if(!dirty)render_input_cell(used);}continue;}
+        if(e>=32&&e<127&&used+1<sizeof input){
+            input[used++]=(char)e;input[used]=0;
+            if(!dirty)render_input_cell(used-1u);
+        }
     }oxp_exit(0);
 }

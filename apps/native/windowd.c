@@ -17,7 +17,7 @@
 /* Persistent, single-threaded userspace WM policy server. The kernel handles
  * per-PID surfaces and low-level composition; no raw framebuffer is exposed.
  * A connection owns at most one logical window until it closes. */
-#define WM_SERVICE_CHANNELS WM_MAX_WINDOWS
+#define WM_SERVICE_CHANNELS (WM_MAX_WINDOWS + 6u)
 static wm_state_t state;
 static uint64_t channels[WM_SERVICE_CHANNELS];
 static uint32_t shell_theme;
@@ -25,6 +25,7 @@ static uint8_t shell_font_blob[OXP_FONT_BYTES];
 static oxp_font_t shell_font;
 static int previous_valid;
 static int native_scene_valid;
+static uint64_t native_scene_last_tick;
 /* Decoded, downsampled RGB565 image; no raw framebuffer mapping in Ring 3. */
 static uint16_t wallpaper_pixels[OXP_WALL_W*OXP_WALL_H];
 static int wallpaper_active;
@@ -120,17 +121,18 @@ static int load_aurora_skin(unsigned theme){
 /* Only mutate current pack after checking requested replacement. If a
  * resource is unexpectedly broken, restore the previous good selection. */
 static int use_theme_art(unsigned requested){
-    unsigned original=shell_theme;
-    if(!load_aurora_skin(requested) || !load_shell_icons(requested)){
-        (void)load_aurora_skin(original);
-        (void)load_shell_icons(original);
-        return 0;
-    }
-    /* Menu artwork is optional: corruption never blocks theme changes. */
+    if(!oxp_theme_valid(requested))return 0;
+    /* Appearance colors are independent of optional artwork files. A missing,
+     * truncated or corrupt sprite pack must not disable the theme selector.
+     * Each resource loader already disables its own bitmap fallback. */
+    (void)load_aurora_skin(requested);
+    (void)load_shell_icons(requested);
     (void)load_menu_art(requested);
     shell_theme=requested;
-    /* Same window geometry, but new pixel colors; invalidate both caches. */
+    /* Force the native frame and both shell layers to repaint in the new
+     * palette even when no window geometry changed. */
     previous_valid=0;native_scene_valid=0;
+    background_visual_dirty=1;overlay_visual_dirty=1;
     return 1;
 }
 static int apply_wallpaper(unsigned ordinal){
@@ -423,6 +425,8 @@ static int bytes_differ(const void *left,const void *right,size_t size){
 }
 static int publish_native_scene(void){
     int changed=!native_scene_valid || skin_input_changed;
+    int immediate=!native_scene_valid || skin_input_changed;
+    unsigned first_row=OXP_SHELL_RASTER_H, last_row=0u;
     oxp_shell_window_t views[OXP_NATIVE_SLOTS];
     for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         int64_t ret=(int64_t)oxp_call3(31,i,(uint64_t)&native_infos[i],sizeof(native_infos[i]));
@@ -430,6 +434,37 @@ static int publish_native_scene(void){
         views[i]=shell_windows[14u+i];
         if(bytes_differ(&native_infos[i],&old_native_infos[i],sizeof(native_infos[i])) ||
            bytes_differ(&views[i],&old_native_windows[i],sizeof(views[i])))changed=1;
+        /* Position, stacking and application lifecycle changes render now;
+         * only high-frequency content-only updates are rate limited. */
+        if(bytes_differ(&views[i],&old_native_windows[i],sizeof(views[i])) ||
+           native_infos[i].active!=old_native_infos[i].active ||
+           native_infos[i].painted!=old_native_infos[i].painted)
+            immediate=1;
+    }
+    if(!changed)return 0;
+    /* Terminal redraws produce many native generation changes (sometimes
+     * one per glyph command). Do not scan/raster/IPC-upload the entire
+     * 1024x768 desktop for every intermediate generation. A later poll
+     * sees the still-different generation, so updates are never lost. */
+    if(!immediate && oxp_ticks()-native_scene_last_tick<3u)return 0;
+    /* With unchanged window ordering and geometry, content cannot affect
+     * pixels outside those windows. Limit the native-layer publication to
+     * the union of their screen-space row intervals. */
+    if(!immediate){
+        for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
+            if(native_infos[i].generation==old_native_infos[i].generation &&
+               native_infos[i].painted==old_native_infos[i].painted)continue;
+            const oxp_shell_window_t *v=&views[i];
+            if(!v->visible || v->minimized || !v->height)continue;
+            unsigned lo=v->y,hi=v->y+v->height+6u;
+            if(lo<first_row)first_row=lo;
+            if(hi>last_row)last_row=hi;
+        }
+    }
+    if(immediate){first_row=0;last_row=OXP_SHELL_RASTER_H;}
+    if(first_row>OXP_SHELL_RASTER_H)first_row=OXP_SHELL_RASTER_H;
+    if(last_row>OXP_SHELL_RASTER_H)last_row=OXP_SHELL_RASTER_H;
+    for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         if(native_infos[i].active && native_infos[i].painted &&
            (!native_scene_valid || old_native_infos[i].generation!=native_infos[i].generation ||
             !old_native_infos[i].painted)){
@@ -455,19 +490,21 @@ static int publish_native_scene(void){
     }
     if(!changed)return 0;
     raster_row.layer=OXP_SHELL_LAYER_NATIVE;
-    for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+    for(unsigned y=first_row;y<last_row;++y){
         raster_row.y=y;
         oxp_native_scene_row_skinned(views,native_infos,native_buffers,y,
                                     raster_row.pixels,skin_loaded?&skin:0,
                                     skin_mouse_x,skin_mouse_y,skin_pressed);
         if((int64_t)oxp_call3(29,(uint64_t)&raster_row,sizeof(raster_row),0))return -1;
     }
-    if((int64_t)oxp_call(30,OXP_SHELL_MASK_NATIVE,0))return -1;
+    if(first_row<last_row && (int64_t)oxp_call(30,immediate?
+        OXP_SHELL_MASK_NATIVE:OXP_SHELL_MASK_NATIVE_PARTIAL,0))return -1;
     for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         old_native_infos[i]=native_infos[i];
         old_native_windows[i]=views[i];
     }
     native_scene_valid=1;
+    native_scene_last_tick=oxp_ticks();
     skin_input_changed=0;
     return 0;
 }
@@ -1094,18 +1131,13 @@ void oxp_main(void){
     oxp_copy(wallpref.path,"home/wallpaper.cfg",sizeof wallpref.path);
     if(oxp_file(APP_FS_READ,&wallpref)==0 && wallpref.size==1 &&
        wallpref.data[0]<32u)(void)apply_wallpaper(wallpref.data[0]);
-    if(!load_aurora_skin(shell_theme) || !load_shell_icons(shell_theme)){
-        /* An absent custom pack never prevents recovery desktop startup. */
-        if(shell_theme!=OXP_THEME_BLUE){
-            (void)load_aurora_skin(OXP_THEME_BLUE);
-            (void)load_shell_icons(OXP_THEME_BLUE);
-        }
-    }
-    (void)load_menu_art(shell_theme);
+    /* Keep the saved color palette even if an optional custom asset fails to
+     * load. The old procedural renderer remains a usable fallback. */
+    (void)use_theme_art(shell_theme);
     load_shell_font();
     refresh_windows();
     if(paint_shell() || publish_native_scene())oxp_exit(2);
-    uint64_t refresh=oxp_ticks();
+    uint64_t refresh=oxp_ticks(),native_poll=refresh;
     for(;;){
         int work=accept_pending();
         if(work<0)break;
@@ -1119,9 +1151,16 @@ void oxp_main(void){
                 (void)oxp_call(23,OXP_SHELL_FOCUS,event.code);
             ++work;
         }
-        if(work || oxp_ticks()-refresh>=25u){
-            if(paint_shell() || publish_native_scene())break;
-            refresh=oxp_ticks();
+        uint64_t now=oxp_ticks();
+        /* Shell artwork only changes on interaction / slow heartbeats.
+         * Native client content is checked independently at ~30 Hz. */
+        if(work || now-refresh>=25u){
+            if(paint_shell())break;
+            refresh=now;
+        }
+        if(work || now-native_poll>=3u){
+            if(publish_native_scene())break;
+            native_poll=now;
         }
         if(!work && oxp_ipc_wait_any(2)<0)break;
     }

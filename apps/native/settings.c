@@ -61,17 +61,39 @@ static int apply(void){
     if(oxp_send((uint64_t)h,&r,sizeof r)!=(int64_t)sizeof r){
         status="IMAGE REQUEST FAILED";(void)oxp_close((uint64_t)h);return 0;
     }
-    int64_t n=oxp_recv((uint64_t)h,&answer,sizeof answer);
-    if(n==-11 && oxp_ipc_wait((uint64_t)h,50)>=0)
+    /* Artwork switches may load multiple resource atlases on the WM side.
+     * A single short IPC wait incorrectly reports the request as failed
+     * while the compositor is still applying the theme. */
+    int64_t n=-11;
+    /* capipc_wait returns -EINVAL on a *normal timer expiry* too.  A timeout
+     * is not an IPC disconnect. Retry reads for a bounded wall-clock period;
+     * only a closed or invalid handle ends the transaction early.  Loading
+     * the three large WM image resources can span several scheduler slices. */
+    uint64_t began=oxp_ticks();
+    while(n==-11 && oxp_ticks()-began<400u){
         n=oxp_recv((uint64_t)h,&answer,sizeof answer);
+        if(n==-11){
+            int64_t waited=oxp_ipc_wait((uint64_t)h,10u);
+            if(waited!=0 && waited!=-22)break;
+        }
+    }
     int ok=n==(int64_t)sizeof answer && answer.magic==WM_MAGIC &&
            answer.version==WM_VERSION && answer.operation==(r.operation|WM_REPLY_FLAG) &&
            answer.status==WM_OK;
-    status=ok?"DESKTOP UPDATED":"IMAGE NOT AVAILABLE";
+    status=ok?"DESKTOP UPDATED":(n==-11?"THEME SERVICE TIMEOUT":"THEME UPDATE FAILED");
     (void)oxp_close((uint64_t)h);
     return ok;
 }
-static void choose_theme(unsigned n){mode=0;palette_index=n;if(apply())save();}
+static void choose_theme(unsigned n){
+    unsigned old=palette_index;int old_mode=mode;
+    mode=0;palette_index=n;
+    if(apply()){
+        save();
+        /* Refresh this Settings window immediately; the normal theme
+         * polling path also refreshes every other native application. */
+        oxp_ui_load_theme(n);
+    }else{palette_index=old;mode=old_mode;}
+}
 static void choose_wallpaper(unsigned n){
     char path[96];if(!wallpaper_at(n,path)){status="NO SUCH WALLPAPER";return;}
     mode=1;wallpaper_index=n;if(apply())save();

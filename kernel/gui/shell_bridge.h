@@ -13,6 +13,8 @@ void shell_bridge_attach(void *desktop);
 void shell_bridge_shutdown(void);
 void shell_bridge_owner_exit(uint64_t pid);
 bool shell_bridge_take_dirty(void);
+/* Full-screen damage is [0,768); native partial commits return row bounds. */
+bool shell_bridge_take_dirty_region(unsigned *first,unsigned *last);
 /* Read-only scene epoch: reject visibly torn, cross-commit renderings. */
 uint64_t shell_bridge_scene_version(void);
 void shell_bridge_request_redraw(void);

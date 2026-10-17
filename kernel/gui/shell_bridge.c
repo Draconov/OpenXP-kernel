@@ -12,7 +12,10 @@ static uint32_t frame_count;
  * writable by the syscall; the compositor reads the published bank. */
 static uint16_t raster[OXP_SHELL_LAYERS][2][OXP_SHELL_RASTER_H][OXP_SHELL_RASTER_W];
 static uint8_t rows_seen[OXP_SHELL_LAYERS][OXP_SHELL_RASTER_H];
-static uint32_t rows_total[OXP_SHELL_LAYERS], active_bank[OXP_SHELL_LAYERS];
+static uint32_t rows_total[OXP_SHELL_LAYERS];
+/* Per-row front-bank ownership makes partial publication O(changed rows),
+ * without copying 1024 pixels per row while interrupts are disabled. */
+static uint8_t active_row_bank[OXP_SHELL_LAYERS][OXP_SHELL_RASTER_H];
 static bool published[OXP_SHELL_LAYERS];
 static uint64_t raster_pid;
 static uint32_t window_order[DESKTOP_WINDOWS];
@@ -21,6 +24,10 @@ static bool has_window_plan;
 static oxp_shell_event_t queue[SHELL_INPUT_CAP];
 static uint32_t qhead,qtail;
 static bool running,dirty,menu_is_open;
+/* A native-only partial commit can repaint a bounded screen stripe. Any
+ * other scene mutation upgrades the pending damage to a full-screen draw. */
+static bool damage_partial;
+static unsigned damage_y0,damage_y1;
 static uint64_t service_pid, last_frame_tick;
 static uint64_t scene_version;
 static bool pointer_captured, shell_press_captured;
@@ -41,11 +48,13 @@ static void unlock_state(uint64_t flags){
 }
 void shell_bridge_reset(void){
     uint64_t flags=lock_state();
-    ++scene_version;running=false;menu_is_open=false;dirty=true;frame_count=0;window_count=0;has_window_plan=false;qhead=qtail=0;service_pid=0;last_frame_tick=0;pointer_captured=false;shell_press_captured=false;
+    ++scene_version;running=false;menu_is_open=false;dirty=true;damage_partial=false;frame_count=0;window_count=0;has_window_plan=false;qhead=qtail=0;service_pid=0;last_frame_tick=0;pointer_captured=false;shell_press_captured=false;
     raster_pid=0;
     for(unsigned l=0;l<OXP_SHELL_LAYERS;++l){
-        published[l]=false;active_bank[l]=0;rows_total[l]=0;
-        for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y)rows_seen[l][y]=0;
+        published[l]=false;rows_total[l]=0;
+        for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+            rows_seen[l][y]=0;active_row_bank[l][y]=0;
+        }
     }
     unlock_state(flags);
 }
@@ -63,9 +72,18 @@ uint64_t shell_bridge_scene_version(void){
     return version;
 }
 void shell_bridge_request_redraw(void){
-    uint64_t flags=lock_state();dirty=true;unlock_state(flags);
+    uint64_t flags=lock_state();dirty=true;damage_partial=false;unlock_state(flags);
 }
-bool shell_bridge_take_dirty(void){uint64_t f=lock_state();bool old=dirty;dirty=false;unlock_state(f);return old;}
+bool shell_bridge_take_dirty_region(unsigned *first,unsigned *last){
+    uint64_t flags=lock_state();
+    bool changed=dirty;
+    if(first)*first=damage_partial?damage_y0:0u;
+    if(last)*last=damage_partial?damage_y1:OXP_SHELL_RASTER_H;
+    dirty=false;damage_partial=false;
+    unlock_state(flags);
+    return changed;
+}
+bool shell_bridge_take_dirty(void){return shell_bridge_take_dirty_region(0,0);}
 bool shell_bridge_active(void){return running && desktop!=NULL;}
 bool shell_bridge_menu_open(void){return shell_bridge_active() && menu_is_open;}
 bool shell_bridge_has_window_plan(void){return shell_bridge_active() && has_window_plan;}
@@ -123,7 +141,7 @@ bool shell_bridge_submit(uint64_t pid,const oxp_shell_draw_t *commands,uint32_t 
     if(changed){
         ++scene_version;
         for(uint32_t i=0;i<count;++i)frame[i]=commands[i];
-        frame_count=count;dirty=true;
+        frame_count=count;dirty=true;damage_partial=false;
         has_window_plan=began;
         window_count=requested_count;
         for(uint32_t j=0;j<requested_count;++j)window_order[j]=requested_order[j];
@@ -154,7 +172,7 @@ bool shell_bridge_raster_row(uint64_t pid,const oxp_shell_raster_row_t *row){
     if(running && service_pid==pid)last_frame_tick=timer_ticks();
 #endif
     unsigned layer=row->layer;
-    unsigned bank=active_bank[layer]^1u;
+    unsigned bank=active_row_bank[layer][row->y]^1u;
     for(unsigned x=0;x<OXP_SHELL_RASTER_W;++x)
         raster[layer][bank][row->y][x]=row->pixels[x];
     if(!rows_seen[layer][row->y]){
@@ -165,20 +183,50 @@ bool shell_bridge_raster_row(uint64_t pid,const oxp_shell_raster_row_t *row){
     return true;
 }
 bool shell_bridge_raster_commit(uint64_t pid,uint32_t mask){
-    if(!pid || !mask || (mask & ~(OXP_SHELL_MASK_BACKGROUND|OXP_SHELL_MASK_OVERLAY|OXP_SHELL_MASK_NATIVE)))
+    const uint32_t full_mask=OXP_SHELL_MASK_BACKGROUND|
+        OXP_SHELL_MASK_OVERLAY|OXP_SHELL_MASK_NATIVE;
+    if(!pid || !mask || (mask & ~(full_mask|OXP_SHELL_MASK_NATIVE_PARTIAL)) ||
+       ((mask&OXP_SHELL_MASK_NATIVE_PARTIAL) && mask!=OXP_SHELL_MASK_NATIVE_PARTIAL))
         return false;
     uint64_t flags=lock_state();
     if(!running || service_pid!=pid || raster_pid!=pid){
         unlock_state(flags);return false;
     }
-    for(unsigned l=0;l<OXP_SHELL_LAYERS;++l)if((mask&(1u<<l)) && rows_total[l]!=OXP_SHELL_RASTER_H){
-        unlock_state(flags);return false;
-    }
-    for(unsigned l=0;l<OXP_SHELL_LAYERS;++l)if(mask&(1u<<l)){
-        active_bank[l]^=1u;
-        published[l]=true;
-        rows_total[l]=0;
-        for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y)rows_seen[l][y]=0;
+    if(mask==OXP_SHELL_MASK_NATIVE_PARTIAL){
+        unsigned layer=OXP_SHELL_LAYER_NATIVE;
+        /* Never publish an incomplete initial scene. Each staged row is
+         * copied into the published bank while interrupts are disabled;
+         * unchanged rows stay untouched, with no 768-row upload. */
+        if(!published[layer] || !rows_total[layer]){
+            unlock_state(flags);return false;
+        }
+        unsigned first=OXP_SHELL_RASTER_H,last=0u;
+        for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y)if(rows_seen[layer][y]){
+            if(y<first)first=y;
+            if(y+1u>last)last=y+1u;
+            active_row_bank[layer][y]^=1u;
+            rows_seen[layer][y]=0;
+        }
+        rows_total[layer]=0;
+        if(!dirty){damage_partial=true;damage_y0=first;damage_y1=last;}
+        else if(damage_partial){
+            if(first<damage_y0)damage_y0=first;
+            if(last>damage_y1)damage_y1=last;
+        }
+    }else{
+        damage_partial=false;
+        for(unsigned l=0;l<OXP_SHELL_LAYERS;++l)
+            if((mask&(1u<<l)) && rows_total[l]!=OXP_SHELL_RASTER_H){
+                unlock_state(flags);return false;
+            }
+        for(unsigned l=0;l<OXP_SHELL_LAYERS;++l)if(mask&(1u<<l)){
+            published[l]=true;
+            rows_total[l]=0;
+            for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+                active_row_bank[l][y]^=1u;
+                rows_seen[l][y]=0;
+            }
+        }
     }
     ++scene_version;
     dirty=true;
@@ -202,9 +250,8 @@ static void raster_compose(fb_surface_t *target,unsigned layer){
         if(y1>target->clip_y+target->clip_h)y1=target->clip_y+target->clip_h;
     }
     if(x0>=x1 || y0>=y1)return;
-    unsigned bank=active_bank[layer];
     for(int y=y0;y<y1;++y){
-        const uint16_t *src=raster[layer][bank][y];
+        const uint16_t *src=raster[layer][active_row_bank[layer][y]][y];
         if(layer==OXP_SHELL_LAYER_BACKGROUND){
             fb_blit565_row(target,x0,y,src+x0,x1-x0);
         }else{
@@ -366,7 +413,7 @@ bool shell_bridge_pop(oxp_shell_event_t *event){
 bool shell_bridge_action(uint32_t action,uint32_t index,uint64_t payload){
     if(!shell_bridge_active() || !desktop)return false;
     if(action==OXP_SHELL_STOP){shell_bridge_shutdown();return true;}
-    dirty=true;
+    dirty=true;damage_partial=false;
     if(action==OXP_SHELL_MENU){menu_is_open=index!=0;return true;}
     /* Only the capability-holding Ring 3 windowd can set global appearance.
        Keep the legacy desktop in sync for service crash recovery. */

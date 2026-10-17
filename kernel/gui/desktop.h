@@ -103,6 +103,7 @@ unsigned desktop_calendar_weekday(unsigned year,unsigned month,unsigned day);
 void desktop_draw(desktop_t *d);
 /* Recompose only the rectangle vacated/occupied by a dragged window. */
 void desktop_redraw_moved_window(desktop_t *d,int oldx,int oldy,int index);
+void desktop_redraw_region(desktop_t *d,int x,int y,int w,int h);
 void desktop_redraw_terminal(desktop_t *d);
 /* Refresh only the paint pixels dirtied by a brush stroke. */
 void desktop_redraw_paint(desktop_t *d);
@@ -111,6 +112,7 @@ void desktop_redraw_taskbar(desktop_t *d);
 void desktop_mouse(desktop_t *d,int x,int y,bool down);
 void desktop_right_mouse(desktop_t *d,int x,int y,bool down);
 void desktop_cursor_update(desktop_t *d);
+void desktop_cursor_position(desktop_t *d,int x,int y);
 void desktop_key_event(desktop_t *d,const input_event_t *event);
 void desktop_key(desktop_t *d,char c);
 void desktop_tick(desktop_t *d,uint64_t ticks);

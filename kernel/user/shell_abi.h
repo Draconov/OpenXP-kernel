@@ -17,6 +17,8 @@
 #define OXP_SHELL_MASK_BACKGROUND 1u
 #define OXP_SHELL_MASK_OVERLAY 2u
 #define OXP_SHELL_MASK_NATIVE 4u
+/* Update only staged native rows; retain all other published rows. */
+#define OXP_SHELL_MASK_NATIVE_PARTIAL 8u
 #define OXP_SHELL_TRANSPARENT 0x0001u
 typedef struct {
     uint32_t layer, y;

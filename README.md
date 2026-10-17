@@ -1,3 +1,16 @@
+## Runtime stability maintenance — window focus, themes, Terminal and cursor
+
+Aurora 17 runtime fixes: a content click on an exposed background window now
+raises it before dispatch; the software pointer tracks shell-captured motion
+and uses a left/top anchored cursor shape; Settings waits for asynchronous
+appearance changes and applies new widget sprites immediately, while the
+shell retains theme palette fallback if an optional sprite pack is unavailable.
+The native compositor batches rapid content-only generations (at most ten
+publishes per second), avoiding full desktop raster uploads on each Terminal
+character. Window moves, focus changes, hover/caption changes, and theme
+changes bypass this throttle. The single README preview and all original
+editable theme PNGs are retained. See the included regression tests.
+
 ## Aurora 16 — Desktop Filesystem & Window Integration
 
 Editable Documents subfolders, bounded file metadata/Properties, safe file
@@ -531,3 +544,21 @@ Documentation has been consolidated by subsystem. Start with [the docs index](do
 The existing unit/sanitizer Makefile targets still run each original C test separately,
 now selected from seven grouped test sources. This cleanup does not combine
 kernel modules, applications, or editable theme source PNGs.
+
+### Aurora 17 runtime input and theme follow-up
+
+- The window service now has capacity for twelve client IPC channels (six
+  window clients plus six short-lived control connections), backed by 24
+  kernel IPC endpoints. Settings retries a timed-out theme reply rather than
+  mistaking an ordinary scheduler timeout for a disconnected service.
+- Terminal uses a lightweight batched text renderer, avoids loading large
+  widget atlases, and skips every idle redraw. Its window output is still
+  rate-limited by the scene compositor to avoid excessive full-scene updates.
+- The mouse pointer now has a top-left hotspot with an explicit opaque outline
+  and white fill; transparent cursor pixels do not overwrite newly composed
+  background pixels during movement.
+- The settings UI reports distinct timeout/error messages for theme updates.
+
+**Runtime verification:** compile and host tests do not prove the live themes,
+terminal latency, or mouse alignment are correct on a particular VM. Verify
+all three themes and terminal focus while moving the cursor on your own VM.

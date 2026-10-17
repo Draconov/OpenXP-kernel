@@ -5,7 +5,7 @@
 #include <stdint.h>
 /* Experimental one-core capability IPC for the trusted boot-image window
  * service. All entries and payloads are kernel-owned. No shared user pages. */
-#define CAPIPC_MAX_ENDPOINTS 12u
+#define CAPIPC_MAX_ENDPOINTS 24u
 #define CAPIPC_QUEUE_CAP 4u
 #define CAPIPC_MSG_BYTES 64u
 #define CAPIPC_SERVER_WAIT_HANDLE 0u

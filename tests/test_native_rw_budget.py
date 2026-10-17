@@ -11,7 +11,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 THEMED = ('run', 'settings', 'filemanager', 'wordpad', 'calculator', 'notepad',
-          'calendar', 'paint', 'terminal', 'clock', 'monitor', 'about')
+          'calendar', 'paint', 'clock', 'monitor', 'about')
 
 
 def bss_bytes(path):
@@ -67,6 +67,15 @@ class NativeImageBudgets(unittest.TestCase):
                 self.assertGreaterEqual(bss, 200000, 'Expected bitmap control, chrome, toolbar, font and icon caches')
                 self.assertGreaterEqual(allocated-bss, 4096, 'No writable headroom')
                 self.assertLessEqual(allocated, 256 * 1024, 'Exceeded intended app budget')
+
+    def test_terminal_uses_lightweight_raster_not_atlas_caches(self):
+        # The console intentionally renders batched native glyphs instead of
+        # loading four enormous PNG atlases on every keystroke.
+        apps=boot_apps()
+        bss=bss_bytes(ROOT/'build/apps/terminal.native.o')
+        allocated=writable_bytes(apps['terminal'])
+        self.assertLess(bss, 32768, 'Console bitmap cache regression')
+        self.assertGreaterEqual(allocated-bss, 4096, 'No writable headroom')
 
 
 if __name__ == '__main__':

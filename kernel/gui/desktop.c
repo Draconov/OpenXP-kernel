@@ -1408,10 +1408,22 @@ static void draw_menu(desktop_t *d) {
         text(d,xx+15,yy+15,options[i],1,28,57,104);
     }
 }
+/* Cursor hotspot is pixel (0,0). Use a single conventional 9x13 arrow
+ * with an opaque dark border and a white interior. The prior bit masks
+ * filled parts of the outline and made the pointer appear reversed. */
+static const char *const cursor_shape[13]={
+    "#        ","##       ","#o#      ","#oo#     ",
+    "#ooo#    ","#oooo#   ","#ooooo#  ","#oooooo# ",
+    "#ooooooo#","#oooo##  ","#oo#o#   ","#o#  #   ",
+    "##    #  "
+};
 static void cursor_restore(desktop_t *d) {
     if(!d->cursor_painted)return;
     fb_surface_t *s=d->surface;
     for(int y=0;y<13;++y)for(int x=0;x<9;++x) {
+        /* Do not overwrite pixels in transparent parts of the cursor.
+         * They may have changed as the compositor refreshed the scene. */
+        if(cursor_shape[y][x]==' ')continue;
         int px=d->cursor_saved_x+x,py=d->cursor_saved_y+y;
         if(px>=0 && px<s->width && py>=0 && py<s->height)
             *(volatile uint32_t *)(s->pixels+(size_t)py*s->pitch+(size_t)px*4)=
@@ -1420,22 +1432,28 @@ static void cursor_restore(desktop_t *d) {
     d->cursor_painted=false;
 }
 static void cursor_paint(desktop_t *d) {
-    static const uint16_t shape[]={1,3,7,15,31,63,127,255,511,63,103,195,129};
     fb_surface_t *s=d->surface;
     int x=d->mouse_x,y=d->mouse_y;
     d->cursor_saved_x=x;d->cursor_saved_y=y;
     for(int row=0;row<13;++row)for(int col=0;col<9;++col) {
+        char glyph=cursor_shape[row][col];
+        if(glyph==' ')continue;
         int px=x+col,py=y+row;
         if(px>=0 && px<s->width && py>=0 && py<s->height) {
             volatile uint32_t *pixel=(volatile uint32_t *)(s->pixels+(size_t)py*s->pitch+(size_t)px*4);
             d->cursor_background[row*9+col]=*pixel;
-            if(shape[row]&(1u<<(8-col)))
-                *pixel=fb_rgb(s,255,255,255);
-            if(col==0 && row>=1 && row<12)
-                *pixel=fb_rgb(s,12,30,51);
+            *pixel=glyph=='#'?fb_rgb(s,12,30,51):fb_rgb(s,255,255,255);
         }
     }
     d->cursor_painted=true;
+}
+void desktop_cursor_position(desktop_t *d,int x,int y){
+    if(!d || !d->surface)return;
+    if(x<0)x=0;
+    if(y<0)y=0;
+    if(x>=d->surface->width)x=d->surface->width-1;
+    if(y>=d->surface->height)y=d->surface->height-1;
+    d->mouse_x=x;d->mouse_y=y;
 }
 void desktop_cursor_update(desktop_t *d) {
     if(!d || !d->surface || !d->surface->pixels)return;
@@ -1564,6 +1582,9 @@ static void desktop_present_region(desktop_t *d,int x,int y,int w,int h){
     else if(front->width>DESKTOP_PRESENT_MAX_W || front->height>DESKTOP_PRESENT_MAX_H ||
             front->pitch<front->width*4)cursor_paint(d);
 }
+void desktop_redraw_region(desktop_t *d,int x,int y,int w,int h){
+    desktop_present_region(d,x,y,w,h);
+}
 void desktop_draw(desktop_t *d){
     if(d && d->surface)
         desktop_present_region(d,0,0,d->surface->width,d->surface->height);
@@ -1675,11 +1696,12 @@ static void desktop_click(desktop_t *d,int x,int y) {
             focus(d,i);
             return;
         }
+        /* A pointer-down must bring its target to the front before the
+         * client receives it. Deferring the reorder to windowd lets slow
+         * paint/terminal frames leave background windows visually behind. */
+        focus(d,i);
 #ifndef OPENXP_WM_HOST_TEST
         if(shell_bridge_active())shell_bridge_notify_focus((uint32_t)i);
-        else focus(d,i);
-#else
-        focus(d,i);
 #endif
         if(i>=DESKTOP_NATIVE){
             unsigned xlocal=(unsigned)(x-w->x);

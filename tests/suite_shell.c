@@ -38,6 +38,14 @@ int main(void){
     static desktop_t d;
     desktop_init(&d,&f,(shell_services_t){.run=launch});
     assert(desktop_top_window(&d)==DESKTOP_ABOUT);
+    /* A content click on an exposed portion of an unfocused window must
+     * raise it before mouse-down delivery; not just caption drags. */
+    static desktop_t background_click;
+    desktop_init(&background_click,&f,(shell_services_t){.run=launch});
+    assert(desktop_top_window(&background_click)==DESKTOP_ABOUT);
+    desktop_mouse(&background_click,120,155,true);
+    assert(desktop_top_window(&background_click)==DESKTOP_TERMINAL);
+    desktop_mouse(&background_click,120,155,false);
     /* XP titlebar: maximize/restore, minimize and close are separate targets.
        The usable desktop excludes the persistent bottom taskbar. */
     desktop_window_t initial=d.windows[DESKTOP_ABOUT];
@@ -623,7 +631,17 @@ int main(void){
     desktop_tick(&d,400);
     desktop_redraw_taskbar(&d);
     compare_full(&d);
-    d.mouse_x=490;d.mouse_y=250;
+    /* Events consumed by windowd update the cursor position without
+     * invoking desktop_mouse(), whose click routing must not run twice. */
+    desktop_cursor_position(&d,123,55);
+    assert(d.mouse_x==123 && d.mouse_y==55);
+    desktop_cursor_update(&d);
+    assert(d.cursor_saved_x==123 && d.cursor_saved_y==55);
+    assert(storage[1+55*W+123]==fb_rgb(&fb,12,30,51));
+    assert(storage[1+56*W+124]==fb_rgb(&fb,12,30,51));
+    assert(storage[1+57*W+124]==fb_rgb(&fb,255,255,255));
+    desktop_cursor_position(&d,10000,-123);
+    assert(d.mouse_x==W-1 && d.mouse_y==0);
     desktop_cursor_update(&d);
     compare_full(&d);
     puts("PASS: off-screen presentation, clipped window moves, clock and cursor parity");
@@ -940,7 +958,44 @@ int main(void){
     shell_bridge_compose_native(&s);
     assert(pixels[1]==0xff00ffu);
     assert(!shell_bridge_raster_commit(999u,OXP_SHELL_MASK_OVERLAY));
-    assert(!shell_bridge_raster_commit(7,8u));
+    /* Partial commits update an already-published native layer without
+     * requiring the other 767 rows or accepting mixed full/partial masks. */
+    assert(!shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE_PARTIAL));
+    row.layer=OXP_SHELL_LAYER_NATIVE;row.y=5;
+    for(unsigned x=0;x<OXP_SHELL_RASTER_W;++x)
+        row.pixels[x]=OXP_SHELL_TRANSPARENT;
+    row.pixels[0]=0x07e0u;
+    assert(shell_bridge_raster_row(7,&row));
+    assert(!shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE|
+                                         OXP_SHELL_MASK_NATIVE_PARTIAL));
+    assert(shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE_PARTIAL));
+    /* Flush any previously pending full commit, then verify partial damage
+     * has its own bounded repaint and full redraws supersede it. */
+    unsigned damage_first=0,damage_last=0;
+    assert(shell_bridge_take_dirty_region(&damage_first,&damage_last));
+    assert(damage_first==0u && damage_last==OXP_SHELL_RASTER_H);
+    row.y=6;
+    assert(shell_bridge_raster_row(7,&row));
+    assert(shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE_PARTIAL));
+    assert(shell_bridge_take_dirty_region(&damage_first,&damage_last));
+    assert(damage_first==6u && damage_last==7u);
+    assert(!shell_bridge_take_dirty_region(&damage_first,&damage_last));
+    shell_bridge_compose_native(&s);
+    assert(pixels[5*32+1]==0x00ff00u);
+    assert(pixels[1]==0xff00ffu); /* unrelated row preserved */
+    assert(!shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE_PARTIAL));
+    assert(!shell_bridge_raster_commit(7,16u));
+    /* A subsequent complete frame must work even after individual rows
+     * have different front-bank indices. */
+    row.layer=OXP_SHELL_LAYER_NATIVE;
+    row.pixels[0]=0x001fu;
+    for(unsigned y=0;y<OXP_SHELL_RASTER_H;++y){
+        row.y=y;
+        assert(shell_bridge_raster_row(7,&row));
+    }
+    assert(shell_bridge_raster_commit(7,OXP_SHELL_MASK_NATIVE));
+    shell_bridge_compose_native(&s);
+    assert(pixels[1]==0x0000ffu && pixels[5*32+1]==0x0000ffu);
     shell_bridge_watchdog(307);
     assert(shell_bridge_active());
     shell_bridge_watchdog(309);

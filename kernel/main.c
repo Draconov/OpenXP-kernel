@@ -320,9 +320,13 @@ static void desktop_interactive_loop(void) {
            published a new coherent image. App-surface writes must not trigger
            another full redraw of the *old* native layer: repeated old-frame
            scanouts caused visible flicker and unnecessary framebuffer traffic. */
+        unsigned damage_y0=0u,damage_y1=OXP_SHELL_RASTER_H;
+        bool scene_changed=shell_bridge_take_dirty_region(&damage_y0,&damage_y1);
+        bool partial_scene=scene_changed && damage_y0<damage_y1 &&
+                           (damage_y0!=0u || damage_y1!=OXP_SHELL_RASTER_H);
         bool redraw=(native_changed &&
                      !shell_bridge_raster_ready(OXP_SHELL_LAYER_NATIVE)) ||
-                    shell_bridge_take_dirty();
+                    (scene_changed && !partial_scene);
         input_event_t event;
         bool cursor_pending=false;
         /* Consume whole PS/2 packets rather than stopping after the first byte.
@@ -331,8 +335,15 @@ static void desktop_interactive_loop(void) {
         for(unsigned i=0;i<128 && input_poll(&desktop_input,&event);++i) {
             if(event.kind==INPUT_NONE)continue;
             desktop_tick(&desktop,timer_ticks());
+            /* Even a pointer gesture consumed by windowd must update the
+             * kernel software cursor. Otherwise its visible position lags
+             * the events delivered to native controls. */
+            if(event.kind==INPUT_MOVE || event.kind==INPUT_BUTTON)
+                desktop_cursor_position(&desktop,event.x,event.y);
             if(shell_bridge_route(&event,shell_bridge_menu_open(),desktop_fb.height)){
-                redraw=true;continue;
+                if(event.kind==INPUT_MOVE)cursor_pending=true;
+                else redraw=true;
+                continue;
             }
             if(event.kind==INPUT_KEY) {
                 int before=desktop_top_window(&desktop);
@@ -411,6 +422,9 @@ static void desktop_interactive_loop(void) {
                 desktop_redraw_active(&desktop);
         }
         if(redraw)desktop_draw(&desktop);
+        else if(partial_scene)
+            desktop_redraw_region(&desktop,0,(int)damage_y0,
+                                 desktop_fb.width,(int)(damage_y1-damage_y0));
         /* IRQ1/IRQ12 enqueue PS/2 bytes and wake HLT immediately; the
            foreground loop does all decoding, GUI and shell work. */
         __asm__ volatile ("hlt" ::: "memory");
