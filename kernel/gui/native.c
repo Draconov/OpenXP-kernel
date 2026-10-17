@@ -19,6 +19,15 @@ static uint32_t content_serial;
 #ifdef OPENXP_CAPIPC_SELFTEST
 static native_wm_test_counts_t wm_test_counts;
 #endif
+static void mark_damage(native_window_t *w,unsigned first,unsigned last){
+    if(!w || first>=last || first>=NATIVE_SURFACE_H)return;
+    if(last>NATIVE_SURFACE_H)last=NATIVE_SURFACE_H;
+    if(w->damage_y0>=w->damage_y1){w->damage_y0=first;w->damage_y1=last;}
+    else{
+        if(first<w->damage_y0)w->damage_y0=first;
+        if(last>w->damage_y1)w->damage_y1=last;
+    }
+}
 static uint32_t content_version(void) {
     if (++content_serial == 0) ++content_serial;
     return content_serial;
@@ -94,6 +103,7 @@ bool native_open(uint64_t pid,const char *title,size_t n){
     w->content_generation=content_version();
     w->canvas_w=320u;w->canvas_h=180u;
     w->surface_w=320u;w->surface_h=180u;
+    mark_damage(w,0u,NATIVE_SURFACE_H);
     for(size_t i=0;i<n;++i)w->title[i]=title[i];
     /* A recycled PID slot must never expose the previous owner's pixels,
      * even if the new owner only paints a small rectangle. */
@@ -115,6 +125,7 @@ bool native_set_text(uint64_t pid,const char *text,size_t n){
     native_window_t *w=&windows[slot];
     for(size_t i=0;i<n;++i)w->text[i]=text[i];
     w->text[n]=0;w->dirty=true;dirty_any=true;
+    mark_damage(w,0u,NATIVE_SURFACE_H);
     w->content_generation=content_version();
     unlock_irq(flags);return true;
 }
@@ -254,6 +265,15 @@ native_window_t native_snapshot_slot(unsigned slot){
     if(slot>=NATIVE_MAX_WINDOWS)return (native_window_t){0};
     uint64_t flags=lock_irq();native_window_t copy=windows[slot];unlock_irq(flags);return copy;
 }
+native_window_t native_snapshot_take_damage_slot(unsigned slot){
+    if(slot>=NATIVE_MAX_WINDOWS)return (native_window_t){0};
+    uint64_t flags=lock_irq();
+    native_window_t result=windows[slot];
+    windows[slot].damage_y0=0;
+    windows[slot].damage_y1=0;
+    unlock_irq(flags);
+    return result;
+}
 bool native_wm_manage(uint64_t client_pid, uint32_t action, uint32_t x, uint32_t y,
                       uint32_t width, uint32_t height) {
     if(!client_pid)return false;
@@ -318,8 +338,14 @@ bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count) {
     /* Expensive CLEAR/FILL commands can touch 230K pixels. Keep IRQ-off
      * windows bounded to eight scanlines while retaining command order.
      * Only publish a new content generation after the entire batch ends. */
+    unsigned damage_first=NATIVE_SURFACE_H,damage_last=0u;
     for(size_t i=0;i<count;++i){
         const native_draw_cmd_t *c=&cmds[i];
+        unsigned lo=c->op==NATIVE_DRAW_CLEAR?0u:c->y;
+        unsigned hi=c->op==NATIVE_DRAW_CLEAR?NATIVE_SURFACE_H:
+                    c->op==NATIVE_DRAW_GLYPH?c->y+7u*c->h:c->y+c->h;
+        if(lo<damage_first)damage_first=lo;
+        if(hi>damage_last)damage_last=hi;
         uint16_t color=rgb565(c->color);
         if(c->op==NATIVE_DRAW_GLYPH){
             uint64_t flags=lock_irq();
@@ -358,6 +384,7 @@ bool native_draw(uint64_t pid, const native_draw_cmd_t *cmds, size_t count) {
     painted[slot]=true;
     windows[slot].surface_w=windows[slot].canvas_w;
     windows[slot].surface_h=windows[slot].canvas_h;
+    mark_damage(&windows[slot],damage_first,damage_last);
     windows[slot].dirty=true;dirty_any=true;
     windows[slot].content_generation=content_version();
     unlock_irq(flags);return true;
@@ -391,6 +418,7 @@ bool native_bitmap(uint64_t pid,const native_bitmap_req_t *req){
     painted[slot]=true;
     windows[slot].surface_w=windows[slot].canvas_w;
     windows[slot].surface_h=windows[slot].canvas_h;
+    mark_damage(&windows[slot],req->y,req->y+req->h);
     windows[slot].dirty=true;dirty_any=true;
     windows[slot].content_generation=content_version();
     unlock_irq(flags);

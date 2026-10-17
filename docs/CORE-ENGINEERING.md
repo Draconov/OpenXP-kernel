@@ -710,3 +710,17 @@ large portions of the screen can still exhibit some visible tearing. Continue
 testing in a VM, including recovery after windowd is terminated.
 
 ---
+
+
+## Aurora 17 runtime-maintenance notes
+
+The Ring 3 `windowd` service must treat an ordinary idle IPC timeout as an
+expected no-message condition, not as a fatal disconnection. Theme-change
+requests and saved appearance preferences use asynchronous notification and
+reload paths. The native Terminal/compositor work includes partial scanline
+updates and shorter interrupt-disabled drawing batches, with full redraws for
+window geometry, focus, and theme transitions.
+
+These fixes are source-level work: successful compilation and host tests do
+not prove smooth Terminal interaction or working live theme switching in
+VirtualBox. Test both with the exact newly built ISO.

@@ -362,13 +362,15 @@ struct syscall_result user_syscall_dispatch(const struct exception_frame *frame)
             if(frame->rdx!=sizeof(oxp_native_info_t) ||
                !aspace_range_valid(space,frame->rsi,sizeof(oxp_native_info_t),true))
                 return (struct syscall_result){0,(uint64_t)-OPENXP_EFAULT};
-            native_window_t snapshot=native_snapshot_slot(slot);
+            native_window_t snapshot=native_snapshot_take_damage_slot(slot);
             oxp_native_info_t info={0};
             info.active=snapshot.active?1u:0u;
             info.painted=native_has_surface(slot)?1u:0u;
             info.generation=snapshot.content_generation;
             info.surface_w=snapshot.surface_w;
             info.surface_h=snapshot.surface_h;
+            info.damage_y0=snapshot.damage_y0;
+            info.damage_y1=snapshot.damage_y1;
             for(unsigned i=0;i<sizeof(info.title);++i)info.title[i]=snapshot.title[i];
             for(unsigned i=0;i<sizeof(info.text);++i)info.text[i]=snapshot.text[i];
             return (struct syscall_result){0,

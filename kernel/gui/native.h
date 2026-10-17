@@ -64,6 +64,9 @@ typedef struct {
     uint32_t wm_x, wm_y, wm_width, wm_height;
     uint32_t wm_geometry_serial, wm_focus_serial;
     uint32_t content_generation;
+    /* Logical scanlines changed since the authorized compositor last polled.
+     * Half-open bounds; first == last means no pending pixel damage. */
+    uint32_t damage_y0,damage_y1;
     uint32_t canvas_w,canvas_h;
     /* Last completed frame size; resize keeps that frame until repaint. */
     uint32_t surface_w,surface_h;
@@ -85,6 +88,8 @@ void native_set_window_size(unsigned slot,unsigned width,unsigned height);
 uint64_t native_canvas_size(uint64_t pid);
 void native_owner_exit(uint64_t pid);
 native_window_t native_snapshot_slot(unsigned slot);
+/* Only the authorized window-manager syscall consumes these dirty bounds. */
+native_window_t native_snapshot_take_damage_slot(unsigned slot);
 bool native_dirty_take(void);
 /* Only reachable from the authorized IPC server syscall after peer lookup.
  * No framebuffer address or arbitrary PID is exposed to userspace. */

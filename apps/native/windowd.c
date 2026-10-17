@@ -10,6 +10,7 @@
 #include "shell_menu_art.h"
 #include "shell_layout.h"
 #include "shell_interaction.h"
+#include "../../kernel/gui/native_viewport.h"
 #include "../../kernel/user/wm_display.h"
 #include "../../kernel/user/shell_abi.h"
 #include "../../kernel/input/input.h"
@@ -21,6 +22,9 @@
 static wm_state_t state;
 static uint64_t channels[WM_SERVICE_CHANNELS];
 static uint32_t shell_theme;
+/* Theme requests are durable: Settings saves the desired appearance, and
+ * windowd recovers it even if the client/IPC connection was interrupted. */
+static unsigned pending_theme;
 static uint8_t shell_font_blob[OXP_FONT_BYTES];
 static oxp_font_t shell_font;
 static int previous_valid;
@@ -135,6 +139,37 @@ static int use_theme_art(unsigned requested){
     background_visual_dirty=1;overlay_visual_dirty=1;
     return 1;
 }
+/* Apply a theme while keeping the existing service alive. A saved one-byte
+ * request also survives a missed IPC reply; re-check at the slow shell tick. */
+static void apply_pending_theme(void){
+    if(!oxp_theme_valid(pending_theme))return;
+    unsigned requested=pending_theme;
+    pending_theme=OXP_THEME_COUNT;
+    if(requested==shell_theme && !wallpaper_active)return;
+    unsigned prior=shell_theme;
+    if(use_theme_art(requested) &&
+       (int64_t)oxp_call(23,OXP_SHELL_THEME,requested)==0){
+        wallpaper_active=0;
+        ++wallpaper_generation;
+    }else (void)use_theme_art(prior);
+}
+static void poll_saved_theme(void){
+    app_file_request_t pref={0};
+    oxp_copy(pref.path,"home/appearance.cfg",sizeof pref.path);
+    if(oxp_file(APP_FS_READ,&pref)==0 && pref.size==1u &&
+       oxp_theme_valid(pref.data[0]) &&
+       (pref.data[0]!=shell_theme || wallpaper_active)){
+        /* A wallpaper remains active while its own preference exists.
+         * Settings deletes wallpaper.cfg when choosing a color theme. */
+        if(wallpaper_active){
+            app_file_request_t wall={0};
+            oxp_copy(wall.path,"home/wallpaper.cfg",sizeof wall.path);
+            if(oxp_file(APP_FS_READ,&wall)==0)return;
+        }
+        pending_theme=pref.data[0];
+    }
+}
+
 static int apply_wallpaper(unsigned ordinal){
     char path[96];if(!selected_wallpaper_path(ordinal,path))return 0;
     /* On failure do not change selected wallpaper. */
@@ -222,13 +257,11 @@ static int service_one(unsigned slot){
        request.version==WM_VERSION && request.operation==WM_THEME){
         reply=(wm_packet_t){.magic=WM_MAGIC,.version=WM_VERSION,
             .operation=WM_THEME|WM_REPLY_FLAG,.status=WM_BAD_REQUEST};
-        unsigned prior=shell_theme;
-        if(oxp_theme_valid(request.x) && use_theme_art(request.x)){
-            if((int64_t)oxp_call(23,OXP_SHELL_THEME,request.x)==0){
-                wallpaper_active=0;
-                ++wallpaper_generation;
-                reply.status=WM_OK;
-            }else (void)use_theme_art(prior);
+        /* A reply must not wait for three potentially large artwork loads.
+         * Queue the request; the compositor handles it after servicing IPC. */
+        if(oxp_theme_valid(request.x)){
+            pending_theme=request.x;
+            reply.status=WM_OK;
         }
     }else if(count==(int64_t)sizeof(request) && request.magic==WM_MAGIC &&
              request.version==WM_VERSION && request.operation==WM_WALLPAPER){
@@ -417,6 +450,10 @@ static oxp_native_info_t old_native_infos[OXP_NATIVE_SLOTS];
 static oxp_shell_window_t old_native_windows[OXP_NATIVE_SLOTS];
 static uint16_t native_buffers[OXP_NATIVE_SLOTS][OXP_NATIVE_W*OXP_NATIVE_H];
 static oxp_native_row_t native_scanline;
+/* A throttled compositor poll must retain unconsumed kernel damage until
+ * the next successful scene update. */
+static unsigned pending_damage_first[OXP_NATIVE_SLOTS];
+static unsigned pending_damage_last[OXP_NATIVE_SLOTS];
 static int native_scene_valid;
 static int bytes_differ(const void *left,const void *right,size_t size){
     const uint8_t *a=left,*b=right;
@@ -431,6 +468,13 @@ static int publish_native_scene(void){
     for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         int64_t ret=(int64_t)oxp_call3(31,i,(uint64_t)&native_infos[i],sizeof(native_infos[i]));
         if(ret)return -1;
+        if(native_infos[i].damage_y0<native_infos[i].damage_y1 &&
+           native_infos[i].damage_y1<=OXP_NATIVE_H){
+            if(native_infos[i].damage_y0<pending_damage_first[i])
+                pending_damage_first[i]=native_infos[i].damage_y0;
+            if(native_infos[i].damage_y1>pending_damage_last[i])
+                pending_damage_last[i]=native_infos[i].damage_y1;
+        }
         views[i]=shell_windows[14u+i];
         if(bytes_differ(&native_infos[i],&old_native_infos[i],sizeof(native_infos[i])) ||
            bytes_differ(&views[i],&old_native_windows[i],sizeof(views[i])))changed=1;
@@ -447,18 +491,19 @@ static int publish_native_scene(void){
      * 1024x768 desktop for every intermediate generation. A later poll
      * sees the still-different generation, so updates are never lost. */
     if(!immediate && oxp_ticks()-native_scene_last_tick<3u)return 0;
-    /* With unchanged window ordering and geometry, content cannot affect
-     * pixels outside those windows. Limit the native-layer publication to
-     * the union of their screen-space row intervals. */
+    /* For a content-only update, compare the cached logical scanlines.
+     * A single typed glyph should invalidate only its physical pixel rows,
+     * not the entire window. Geometry/title changes retain full invalidation. */
     if(!immediate){
         for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
-            if(native_infos[i].generation==old_native_infos[i].generation &&
-               native_infos[i].painted==old_native_infos[i].painted)continue;
-            const oxp_shell_window_t *v=&views[i];
-            if(!v->visible || v->minimized || !v->height)continue;
-            unsigned lo=v->y,hi=v->y+v->height+6u;
-            if(lo<first_row)first_row=lo;
-            if(hi>last_row)last_row=hi;
+            if(bytes_differ(native_infos[i].title,old_native_infos[i].title,
+                            sizeof(native_infos[i].title)) ||
+               bytes_differ(native_infos[i].text,old_native_infos[i].text,
+                            sizeof(native_infos[i].text)) ||
+               native_infos[i].surface_w!=old_native_infos[i].surface_w ||
+               native_infos[i].surface_h!=old_native_infos[i].surface_h){
+                immediate=1;break;
+            }
         }
     }
     if(immediate){first_row=0;last_row=OXP_SHELL_RASTER_H;}
@@ -468,7 +513,14 @@ static int publish_native_scene(void){
         if(native_infos[i].active && native_infos[i].painted &&
            (!native_scene_valid || old_native_infos[i].generation!=native_infos[i].generation ||
             !old_native_infos[i].painted)){
-            for(unsigned y=0;y<native_infos[i].surface_h && y<OXP_NATIVE_H;++y){
+            unsigned start=0u,end=native_infos[i].surface_h;
+            if(end>OXP_NATIVE_H)end=OXP_NATIVE_H;
+            if(native_scene_valid && !immediate && old_native_infos[i].painted &&
+               pending_damage_first[i]<pending_damage_last[i]){
+                start=pending_damage_first[i];
+                if(end>pending_damage_last[i])end=pending_damage_last[i];
+            }
+            for(unsigned y=start;y<end;++y){
                 /* An app can exit while its pixels are being captured. This
                  * is a normal lifecycle race, not a reason to kill windowd. */
                 if((int64_t)oxp_call3(32,i,(uint64_t)&native_scanline,y)){
@@ -478,8 +530,26 @@ static int publish_native_scene(void){
                     changed=1;
                     break;
                 }
+                uint16_t *cached=&native_buffers[i][y*OXP_NATIVE_W];
+                if(!immediate && views[i].visible && !views[i].minimized &&
+                   bytes_differ(cached,native_scanline.pixels,
+                                OXP_NATIVE_W*sizeof(uint16_t))){
+                    oxp_native_viewport_t viewport=oxp_native_viewport(
+                        views[i].x,views[i].y,views[i].width,views[i].height);
+                    unsigned height=native_infos[i].surface_h;
+                    if(viewport.h && height){
+                        /* Invert the nearest-neighbour sampling from
+                         * native_scene.c; include every row that samples y. */
+                        unsigned lo=viewport.y+(unsigned)(
+                            ((uint64_t)y*viewport.h+height-1u)/height);
+                        unsigned hi=viewport.y+(unsigned)(
+                            ((uint64_t)(y+1u)*viewport.h+height-1u)/height);
+                        if(lo<first_row)first_row=lo;
+                        if(hi>last_row)last_row=hi;
+                    }
+                }
                 for(unsigned x=0;x<OXP_NATIVE_W;++x)
-                    native_buffers[i][y*OXP_NATIVE_W+x]=native_scanline.pixels[x];
+                    cached[x]=native_scanline.pixels[x];
             }
         }
     }
@@ -502,6 +572,8 @@ static int publish_native_scene(void){
     for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
         old_native_infos[i]=native_infos[i];
         old_native_windows[i]=views[i];
+        pending_damage_first[i]=OXP_NATIVE_H;
+        pending_damage_last[i]=0u;
     }
     native_scene_valid=1;
     native_scene_last_tick=oxp_ticks();
@@ -1104,6 +1176,11 @@ void oxp_main(void){
     /* These are mutable service state, not constants: the native ELF packer
      * currently maps .text/.rodata/.data read-only. Initialize explicitly
      * in zero-filled RW memory rather than storing mutable data in RX pages. */
+    pending_theme=OXP_THEME_COUNT;
+    for(unsigned i=0;i<OXP_NATIVE_SLOTS;++i){
+        pending_damage_first[i]=OXP_NATIVE_H;
+        pending_damage_last[i]=0u;
+    }
     drag_index=-1;
     resize_index=-1;
     skin_mouse_x=-1;skin_mouse_y=-1;skin_last_hover=-1;
@@ -1137,7 +1214,7 @@ void oxp_main(void){
     load_shell_font();
     refresh_windows();
     if(paint_shell() || publish_native_scene())oxp_exit(2);
-    uint64_t refresh=oxp_ticks(),native_poll=refresh;
+    uint64_t refresh=oxp_ticks(),native_poll=refresh,theme_poll=refresh;
     for(;;){
         int work=accept_pending();
         if(work<0)break;
@@ -1152,6 +1229,14 @@ void oxp_main(void){
             ++work;
         }
         uint64_t now=oxp_ticks();
+        if(now-theme_poll>=25u){
+            poll_saved_theme();
+            theme_poll=now;
+        }
+        if(oxp_theme_valid(pending_theme)){
+            apply_pending_theme();
+            ++work;
+        }
         /* Shell artwork only changes on interaction / slow heartbeats.
          * Native client content is checked independently at ~30 Hz. */
         if(work || now-refresh>=25u){
@@ -1162,7 +1247,12 @@ void oxp_main(void){
             if(publish_native_scene())break;
             native_poll=now;
         }
-        if(!work && oxp_ipc_wait_any(2)<0)break;
+        if(!work){
+            int64_t wait_result=oxp_ipc_wait_any(2);
+            /* CAPIPC_WAIT reports a *normal* timer expiry as -EINVAL (-22).
+             * Never terminate the WM service merely because it is idle! */
+            if(wait_result<0 && wait_result!=-22)break;
+        }
     }
     for(unsigned i=0;i<WM_SERVICE_CHANNELS;++i)drop_channel(i);
     (void)oxp_call(23,OXP_SHELL_STOP,0);

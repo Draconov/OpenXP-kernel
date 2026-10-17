@@ -297,6 +297,22 @@ int main(void) {
     assert(native_snapshot_slot(1).surface_w==expanded_w);
     assert(native_snapshot_slot(1).surface_h==expanded_h);
     assert(native_test_pixel(1,expanded_w-1u,expanded_h-1u)==0x07e0u);
+    /* The WM consumes the accumulated pixel-damage interval at snapshot,
+     * so a subsequent typed glyph transfers only seven logical rows. */
+    native_window_t full_damage=native_snapshot_take_damage_slot(1);
+    assert(full_damage.damage_y0==0 && full_damage.damage_y1==NATIVE_SURFACE_H);
+    native_window_t no_damage=native_snapshot_take_damage_slot(1);
+    assert(no_damage.damage_y0==no_damage.damage_y1);
+    native_draw_cmd_t glyph={NATIVE_DRAW_GLYPH,12,27,'A',1,0xffffff};
+    assert(native_draw(100,&glyph,1));
+    native_window_t glyph_damage=native_snapshot_take_damage_slot(1);
+    assert(glyph_damage.damage_y0==27u && glyph_damage.damage_y1==34u);
+    native_draw_cmd_t small[]={{NATIVE_DRAW_FILL,8,40,2,3,0x112233},
+                               {NATIVE_DRAW_FILL,8,50,2,2,0x112233}};
+    assert(native_draw(100,small,2));
+    native_window_t merged_damage=native_snapshot_take_damage_slot(1);
+    assert(merged_damage.damage_y0==40u && merged_damage.damage_y1==52u);
+
     uint16_t high_row[NATIVE_SURFACE_W];
     assert(native_copy_surface_row(1,expanded_h-1u,high_row,NATIVE_SURFACE_W));
     assert(high_row[expanded_w-1u]==0x07e0u);

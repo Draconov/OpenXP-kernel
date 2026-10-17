@@ -23,7 +23,8 @@ def elf_from_flat(code: bytes) -> bytes:
                        len(code), len(code), 1)
     return header + phdr + code
 
-def elf_from_native_flat(code: bytes, writable_size: int = 32768) -> bytes:
+def elf_from_native_flat(code: bytes, writable_size: int = 32768,
+                         max_code_size: int = 32768) -> bytes:
     """Relocation-free native image with separate RX code and zero-filled RW data.
 
     Native linker places .bss on the first page after the flat code. The
@@ -31,8 +32,8 @@ def elf_from_native_flat(code: bytes, writable_size: int = 32768) -> bytes:
     other apps retain the small default reservation. This is
     an interim format; future programs should use proper multi-segment ELF.
     """
-    if not 0 < len(code) <= 32768:
-        raise ValueError("native image must have 1..32768 bytes of PIC code")
+    if not 0 < len(code) <= max_code_size:
+        raise ValueError(f"native image must have 1..{max_code_size} bytes of PIC code")
     ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
     header = struct.pack("<16sHHIQQQIHHHHHH", ident, 3, 62, 1,
                          BASE, 64, 0, 0, 64, 56, 2, 0, 0, 0)
@@ -89,7 +90,8 @@ def main() -> None:
             app.read_bytes(), 2 * 1024 * 1024 if app.stem == "windowd" else
             256 * 1024 if app.stem in ("run", "settings", "filemanager", "wordpad",
                                      "calculator", "notepad", "calendar", "paint",
-                                     "terminal", "clock", "monitor", "about") else 32768)))
+                                     "terminal", "clock", "monitor", "about") else 32768,
+                            max_code_size=65536 if app.stem == "windowd" else 32768)))
     if args.wallpaper_dir.is_dir():
         for image in sorted(args.wallpaper_dir.glob("*.bmp")):
             content = image.read_bytes()

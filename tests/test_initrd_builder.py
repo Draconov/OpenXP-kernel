@@ -34,6 +34,15 @@ class BuilderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_map("104000 104000 10 16 .data\n104000 104000 59270 16 .bss\n")
 
+    def test_windowd_can_exceed_legacy_32k_code_limit_safely(self):
+        with self.assertRaises(ValueError):
+            elf_from_native_flat(bytes(33000))
+        image=elf_from_native_flat(bytes(33000),2*1024*1024,max_code_size=65536)
+        self.assertEqual(len(image),176+33000)
+        self.assertEqual(int.from_bytes(image[136:144],'little'),0x109000)
+        with self.assertRaises(ValueError):
+            elf_from_native_flat(bytes(65537),2*1024*1024,max_code_size=65536)
+
     def test_fault_map_uses_real_ip_not_stale_cr2(self):
         log = ("USER EXCEPTION pid=1 vector=6 rip=0x8000100020 "
                "rsp=0x80003f4ff0 image_offset=0x0000000000100020\n")

@@ -79,6 +79,8 @@ _Static_assert(sizeof(oxp_shell_window_t)==72,"window query wire ABI");
 #define OXP_NATIVE_H 360u
 typedef struct {
     uint32_t active, painted, generation, surface_w, surface_h;
+    /* Changed logical scanlines since previous WM snapshot; half-open. */
+    uint32_t damage_y0,damage_y1;
     char title[48];
     char text[384];
 } oxp_native_info_t;

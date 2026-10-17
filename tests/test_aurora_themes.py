@@ -46,6 +46,21 @@ class ThemePacks(unittest.TestCase):
             pixels=[png_rgba(self.root(name)/file) for name in NAMES]
             self.assertEqual(len({(w,h) for w,h,_ in pixels}),1,file)
             self.assertEqual(len({raw for _,_,raw in pixels}),3,file)
+    def test_theme_service_survives_idle_timeouts_and_recovers_preferences(self):
+        wm=(ROOT/'apps/native/windowd.c').read_text()
+        settings=(ROOT/'apps/native/settings.c').read_text()
+        self.assertIn('wait_result!=-22',wm)
+        self.assertIn('poll_saved_theme()',wm)
+        self.assertIn('apply_pending_theme()',wm)
+        self.assertLess(settings.index('    save();\n    oxp_ui_load_theme(n);'),
+                        settings.index('    if(apply())status="THEME QUEUED";'))
+
+    def test_terminal_delta_repaint_path(self):
+        wm=(ROOT/'apps/native/windowd.c').read_text()
+        self.assertIn('bytes_differ(cached,native_scanline.pixels',wm)
+        self.assertIn('oxp_native_viewport(',wm)
+        self.assertIn('OXP_SHELL_MASK_NATIVE_PARTIAL',wm)
+
     def test_theme_switch_paths_match_initrd(self):
         # String constants must match the actual file names bundled in mkinitrd.
         routes=(ROOT/'apps/native/theme.h').read_text()

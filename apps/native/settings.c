@@ -85,14 +85,15 @@ static int apply(void){
     return ok;
 }
 static void choose_theme(unsigned n){
-    unsigned old=palette_index;int old_mode=mode;
+    if(!oxp_theme_valid(n))return;
     mode=0;palette_index=n;
-    if(apply()){
-        save();
-        /* Refresh this Settings window immediately; the normal theme
-         * polling path also refreshes every other native application. */
-        oxp_ui_load_theme(n);
-    }else{palette_index=old;mode=old_mode;}
+    /* Persist before contacting windowd. Even when its channel is briefly
+     * unavailable, the WM's preference poll will eventually apply the theme.
+     * This also lets every other app observe the same preference immediately. */
+    save();
+    oxp_ui_load_theme(n);
+    if(apply())status="THEME QUEUED";
+    else status="THEME SAVED - WM RETRY PENDING";
 }
 static void choose_wallpaper(unsigned n){
     char path[96];if(!wallpaper_at(n,path)){status="NO SUCH WALLPAPER";return;}

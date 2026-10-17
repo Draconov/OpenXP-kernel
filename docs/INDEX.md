@@ -6,7 +6,7 @@ OpenXP documentation is organized by subsystem rather than by every small featur
 - [Theming and artwork](THEMING.md) — graphics, sprites, atlas editing and themes
 - [Kernel, userspace and compositor](CORE-ENGINEERING.md) — architecture and system APIs
 - [Filesystem and storage](FILES-AND-STORAGE.md) — VFS, file management and persistent disk
-- [Desktop and native applications](DESKTOP-AND-APPS.md) — interaction and apps
+- [Desktop and native applications](DESKTOP-AND-APPS.md) — interaction, apps and [VirtualBox setup](DESKTOP-AND-APPS.md#virtualbox-setup)
 - [Roadmap](ROADMAP.md) — future work
 - [Historical test reports](VERIFICATION-HISTORY.md) — release audit trail
 - `FONT-LICENSE.txt` — original licensing notice (unmodified)
